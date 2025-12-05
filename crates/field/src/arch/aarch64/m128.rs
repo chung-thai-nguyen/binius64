@@ -23,11 +23,11 @@ use super::super::portable::{
 };
 use crate::{
 	BinaryField,
-	arch::binary_utils::{as_array_mut, as_array_ref},
 	arithmetic_traits::Broadcast,
 	underlier::{
-		NumCast, SmallU, U1, U2, U4, UnderlierType, UnderlierWithBitOps, WithUnderlier,
-		impl_divisible, impl_iteration, unpack_lo_128b_fallback,
+		NumCast, SmallU, UnderlierType, UnderlierWithBitOps, WithUnderlier,
+		divisible::{Divisible, mapget},
+		impl_divisible_bitmask, unpack_lo_128b_fallback,
 	},
 };
 
@@ -217,8 +217,259 @@ impl DeserializeBytes for M128 {
 	}
 }
 
-impl_divisible!(@pairs M128, u128, u64, u32, u16, u8);
+impl_divisible_bitmask!(M128, 1, 2, 4);
 impl_pack_scalar!(M128);
+
+// Manual Divisible implementations using NEON intrinsics
+
+impl Divisible<u128> for M128 {
+	const LOG_N: usize = 0;
+
+	#[inline]
+	fn value_iter(value: Self) -> impl ExactSizeIterator<Item = u128> + Send + Clone {
+		mapget::value_iter(value)
+	}
+
+	#[inline]
+	fn ref_iter(value: &Self) -> impl ExactSizeIterator<Item = u128> + Send + Clone + '_ {
+		mapget::value_iter(*value)
+	}
+
+	#[inline]
+	fn slice_iter(slice: &[Self]) -> impl ExactSizeIterator<Item = u128> + Send + Clone + '_ {
+		mapget::slice_iter(slice)
+	}
+
+	#[inline]
+	fn get(self, index: usize) -> u128 {
+		match index {
+			0 => self.into(),
+			_ => panic!("index out of bounds"),
+		}
+	}
+
+	#[inline]
+	fn set(self, index: usize, val: u128) -> Self {
+		match index {
+			0 => Self::from(val),
+			_ => panic!("index out of bounds"),
+		}
+	}
+}
+
+impl Divisible<u64> for M128 {
+	const LOG_N: usize = 1;
+
+	#[inline]
+	fn value_iter(value: Self) -> impl ExactSizeIterator<Item = u64> + Send + Clone {
+		mapget::value_iter(value)
+	}
+
+	#[inline]
+	fn ref_iter(value: &Self) -> impl ExactSizeIterator<Item = u64> + Send + Clone + '_ {
+		mapget::value_iter(*value)
+	}
+
+	#[inline]
+	fn slice_iter(slice: &[Self]) -> impl ExactSizeIterator<Item = u64> + Send + Clone + '_ {
+		mapget::slice_iter(slice)
+	}
+
+	#[inline]
+	fn get(self, index: usize) -> u64 {
+		unsafe {
+			match index {
+				0 => vgetq_lane_u64(self.0, 0),
+				1 => vgetq_lane_u64(self.0, 1),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+
+	#[inline]
+	fn set(self, index: usize, val: u64) -> Self {
+		unsafe {
+			match index {
+				0 => Self(vsetq_lane_u64(val, self.0, 0)),
+				1 => Self(vsetq_lane_u64(val, self.0, 1)),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+}
+
+impl Divisible<u32> for M128 {
+	const LOG_N: usize = 2;
+
+	#[inline]
+	fn value_iter(value: Self) -> impl ExactSizeIterator<Item = u32> + Send + Clone {
+		mapget::value_iter(value)
+	}
+
+	#[inline]
+	fn ref_iter(value: &Self) -> impl ExactSizeIterator<Item = u32> + Send + Clone + '_ {
+		mapget::value_iter(*value)
+	}
+
+	#[inline]
+	fn slice_iter(slice: &[Self]) -> impl ExactSizeIterator<Item = u32> + Send + Clone + '_ {
+		mapget::slice_iter(slice)
+	}
+
+	#[inline]
+	fn get(self, index: usize) -> u32 {
+		unsafe {
+			let v: uint32x4_t = self.into();
+			match index {
+				0 => vgetq_lane_u32(v, 0),
+				1 => vgetq_lane_u32(v, 1),
+				2 => vgetq_lane_u32(v, 2),
+				3 => vgetq_lane_u32(v, 3),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+
+	#[inline]
+	fn set(self, index: usize, val: u32) -> Self {
+		unsafe {
+			let v: uint32x4_t = self.into();
+			match index {
+				0 => Self::from(vsetq_lane_u32(val, v, 0)),
+				1 => Self::from(vsetq_lane_u32(val, v, 1)),
+				2 => Self::from(vsetq_lane_u32(val, v, 2)),
+				3 => Self::from(vsetq_lane_u32(val, v, 3)),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+}
+
+impl Divisible<u16> for M128 {
+	const LOG_N: usize = 3;
+
+	#[inline]
+	fn value_iter(value: Self) -> impl ExactSizeIterator<Item = u16> + Send + Clone {
+		mapget::value_iter(value)
+	}
+
+	#[inline]
+	fn ref_iter(value: &Self) -> impl ExactSizeIterator<Item = u16> + Send + Clone + '_ {
+		mapget::value_iter(*value)
+	}
+
+	#[inline]
+	fn slice_iter(slice: &[Self]) -> impl ExactSizeIterator<Item = u16> + Send + Clone + '_ {
+		mapget::slice_iter(slice)
+	}
+
+	#[inline]
+	fn get(self, index: usize) -> u16 {
+		unsafe {
+			let v: uint16x8_t = self.into();
+			match index {
+				0 => vgetq_lane_u16(v, 0),
+				1 => vgetq_lane_u16(v, 1),
+				2 => vgetq_lane_u16(v, 2),
+				3 => vgetq_lane_u16(v, 3),
+				4 => vgetq_lane_u16(v, 4),
+				5 => vgetq_lane_u16(v, 5),
+				6 => vgetq_lane_u16(v, 6),
+				7 => vgetq_lane_u16(v, 7),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+
+	#[inline]
+	fn set(self, index: usize, val: u16) -> Self {
+		unsafe {
+			let v: uint16x8_t = self.into();
+			match index {
+				0 => Self::from(vsetq_lane_u16(val, v, 0)),
+				1 => Self::from(vsetq_lane_u16(val, v, 1)),
+				2 => Self::from(vsetq_lane_u16(val, v, 2)),
+				3 => Self::from(vsetq_lane_u16(val, v, 3)),
+				4 => Self::from(vsetq_lane_u16(val, v, 4)),
+				5 => Self::from(vsetq_lane_u16(val, v, 5)),
+				6 => Self::from(vsetq_lane_u16(val, v, 6)),
+				7 => Self::from(vsetq_lane_u16(val, v, 7)),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+}
+
+impl Divisible<u8> for M128 {
+	const LOG_N: usize = 4;
+
+	#[inline]
+	fn value_iter(value: Self) -> impl ExactSizeIterator<Item = u8> + Send + Clone {
+		mapget::value_iter(value)
+	}
+
+	#[inline]
+	fn ref_iter(value: &Self) -> impl ExactSizeIterator<Item = u8> + Send + Clone + '_ {
+		mapget::value_iter(*value)
+	}
+
+	#[inline]
+	fn slice_iter(slice: &[Self]) -> impl ExactSizeIterator<Item = u8> + Send + Clone + '_ {
+		mapget::slice_iter(slice)
+	}
+
+	#[inline]
+	fn get(self, index: usize) -> u8 {
+		unsafe {
+			let v: uint8x16_t = self.into();
+			match index {
+				0 => vgetq_lane_u8(v, 0),
+				1 => vgetq_lane_u8(v, 1),
+				2 => vgetq_lane_u8(v, 2),
+				3 => vgetq_lane_u8(v, 3),
+				4 => vgetq_lane_u8(v, 4),
+				5 => vgetq_lane_u8(v, 5),
+				6 => vgetq_lane_u8(v, 6),
+				7 => vgetq_lane_u8(v, 7),
+				8 => vgetq_lane_u8(v, 8),
+				9 => vgetq_lane_u8(v, 9),
+				10 => vgetq_lane_u8(v, 10),
+				11 => vgetq_lane_u8(v, 11),
+				12 => vgetq_lane_u8(v, 12),
+				13 => vgetq_lane_u8(v, 13),
+				14 => vgetq_lane_u8(v, 14),
+				15 => vgetq_lane_u8(v, 15),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+
+	#[inline]
+	fn set(self, index: usize, val: u8) -> Self {
+		unsafe {
+			let v: uint8x16_t = self.into();
+			match index {
+				0 => Self::from(vsetq_lane_u8(val, v, 0)),
+				1 => Self::from(vsetq_lane_u8(val, v, 1)),
+				2 => Self::from(vsetq_lane_u8(val, v, 2)),
+				3 => Self::from(vsetq_lane_u8(val, v, 3)),
+				4 => Self::from(vsetq_lane_u8(val, v, 4)),
+				5 => Self::from(vsetq_lane_u8(val, v, 5)),
+				6 => Self::from(vsetq_lane_u8(val, v, 6)),
+				7 => Self::from(vsetq_lane_u8(val, v, 7)),
+				8 => Self::from(vsetq_lane_u8(val, v, 8)),
+				9 => Self::from(vsetq_lane_u8(val, v, 9)),
+				10 => Self::from(vsetq_lane_u8(val, v, 10)),
+				11 => Self::from(vsetq_lane_u8(val, v, 11)),
+				12 => Self::from(vsetq_lane_u8(val, v, 12)),
+				13 => Self::from(vsetq_lane_u8(val, v, 13)),
+				14 => Self::from(vsetq_lane_u8(val, v, 14)),
+				15 => Self::from(vsetq_lane_u8(val, v, 15)),
+				_ => panic!("index out of bounds"),
+			}
+		}
+	}
+}
 
 impl Not for M128 {
 	type Output = Self;
@@ -322,69 +573,6 @@ impl UnderlierWithBitOps for M128 {
 
 	fn fill_with_bit(val: u8) -> Self {
 		Self(unsafe { vdupq_n_u64(u64::fill_with_bit(val)) })
-	}
-
-	#[inline(always)]
-	unsafe fn get_subvalue<T>(&self, i: usize) -> T
-	where
-		T: UnderlierType + NumCast<Self>,
-	{
-		match T::BITS {
-			1 | 2 | 4 => {
-				let elements_in_8 = 8 / T::BITS;
-				let shift = (i % elements_in_8) * T::BITS;
-				let mask = (1u8 << T::BITS) - 1;
-
-				T::num_cast_from(as_array_ref::<_, u8, 16, _>(self, |a| {
-					Self::from((a[i / elements_in_8] >> shift) & mask)
-				}))
-			}
-			8 => T::num_cast_from(as_array_ref::<_, u8, 16, _>(self, |a| Self::from(a[i]))),
-			16 => T::num_cast_from(as_array_ref::<_, u16, 8, _>(self, |a| Self::from(a[i]))),
-			32 => T::num_cast_from(as_array_ref::<_, u32, 4, _>(self, |a| Self::from(a[i]))),
-			64 => T::num_cast_from(as_array_ref::<_, u64, 2, _>(self, |a| Self::from(a[i]))),
-			128 => T::num_cast_from(*self),
-			_ => panic!("unsupported bit count"),
-		}
-	}
-
-	#[inline(always)]
-	unsafe fn set_subvalue<T>(&mut self, i: usize, val: T)
-	where
-		T: UnderlierWithBitOps,
-		Self: From<T>,
-	{
-		match T::BITS {
-			1 | 2 | 4 => {
-				let elements_in_8 = 8 / T::BITS;
-				let mask = (1u8 << T::BITS) - 1;
-				let shift = (i % elements_in_8) * T::BITS;
-				let val = u8::num_cast_from(Self::from(val)) << shift;
-				let mask = mask << shift;
-
-				as_array_mut::<_, u8, 16>(self, |array| {
-					let element = &mut array[i / elements_in_8];
-					*element &= !mask;
-					*element |= val;
-				});
-			}
-			8 => as_array_mut::<_, u8, 16>(self, |array| {
-				array[i] = u8::num_cast_from(Self::from(val));
-			}),
-			16 => as_array_mut::<_, u16, 8>(self, |array| {
-				array[i] = u16::num_cast_from(Self::from(val));
-			}),
-			32 => as_array_mut::<_, u32, 4>(self, |array| {
-				array[i] = u32::num_cast_from(Self::from(val));
-			}),
-			64 => as_array_mut::<_, u64, 2>(self, |array| {
-				array[i] = u64::num_cast_from(Self::from(val));
-			}),
-			128 => {
-				*self = Self::from(val);
-			}
-			_ => panic!("unsupported bit count"),
-		}
 	}
 
 	#[inline(always)]
@@ -559,12 +747,6 @@ where
 		value.into()
 	}
 }
-
-impl_iteration!(M128,
-	@strategy BitIterationStrategy, U1,
-	@strategy FallbackStrategy, U2, U4,
-	@strategy DivisibleStrategy, u8, u16, u32, u64, u128, M128,
-);
 
 #[cfg(test)]
 mod tests {

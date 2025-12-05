@@ -23,7 +23,7 @@ use crate::{
 	arithmetic_traits::Broadcast,
 	underlier::{
 		NumCast, SmallU, U1, U2, U4, UnderlierType, UnderlierWithBitOps, WithUnderlier,
-		impl_divisible, impl_iteration,
+		impl_divisible_bitmask, impl_divisible_memcast,
 	},
 };
 
@@ -171,7 +171,8 @@ impl DeserializeBytes for M128 {
 	}
 }
 
-impl_divisible!(@pairs M128, u128, u64, u32, u16, u8);
+impl_divisible_memcast!(M128, u128, u64, u32, u16, u8);
+impl_divisible_bitmask!(M128, 1, 2, 4);
 impl_pack_scalar!(M128);
 
 impl BitAnd for M128 {
@@ -305,62 +306,6 @@ impl UnderlierWithBitOps for M128 {
 	fn shr_128b_lanes(self, shift: usize) -> Self {
 		self >> shift
 	}
-
-	#[inline]
-	unsafe fn get_subvalue<T>(&self, i: usize) -> T
-	where
-		T: UnderlierType + NumCast<Self>,
-	{
-		match T::LOG_BITS {
-			0..4 => {
-				let byte = match i >> (3 - T::LOG_BITS) {
-					0 => u8x16_extract_lane::<0>(self.0),
-					1 => u8x16_extract_lane::<1>(self.0),
-					2 => u8x16_extract_lane::<2>(self.0),
-					3 => u8x16_extract_lane::<3>(self.0),
-					4 => u8x16_extract_lane::<4>(self.0),
-					5 => u8x16_extract_lane::<5>(self.0),
-					6 => u8x16_extract_lane::<6>(self.0),
-					7 => u8x16_extract_lane::<7>(self.0),
-					8 => u8x16_extract_lane::<8>(self.0),
-					9 => u8x16_extract_lane::<9>(self.0),
-					10 => u8x16_extract_lane::<10>(self.0),
-					11 => u8x16_extract_lane::<11>(self.0),
-					12 => u8x16_extract_lane::<12>(self.0),
-					13 => u8x16_extract_lane::<13>(self.0),
-					14 => u8x16_extract_lane::<14>(self.0),
-					15 => u8x16_extract_lane::<15>(self.0),
-					_ => unreachable!(),
-				};
-
-				T::num_cast_from(Self::from(byte))
-			}
-			4 => match i {
-				0 => T::num_cast_from(Self::from(u16x8_extract_lane::<0>(self.0))),
-				1 => T::num_cast_from(Self::from(u16x8_extract_lane::<1>(self.0))),
-				2 => T::num_cast_from(Self::from(u16x8_extract_lane::<2>(self.0))),
-				3 => T::num_cast_from(Self::from(u16x8_extract_lane::<3>(self.0))),
-				4 => T::num_cast_from(Self::from(u16x8_extract_lane::<4>(self.0))),
-				5 => T::num_cast_from(Self::from(u16x8_extract_lane::<5>(self.0))),
-				6 => T::num_cast_from(Self::from(u16x8_extract_lane::<6>(self.0))),
-				7 => T::num_cast_from(Self::from(u16x8_extract_lane::<7>(self.0))),
-				_ => unreachable!(),
-			},
-			5 => match i {
-				0 => T::num_cast_from(Self::from(u32x4_extract_lane::<0>(self.0))),
-				1 => T::num_cast_from(Self::from(u32x4_extract_lane::<1>(self.0))),
-				2 => T::num_cast_from(Self::from(u32x4_extract_lane::<2>(self.0))),
-				3 => T::num_cast_from(Self::from(u32x4_extract_lane::<3>(self.0))),
-				_ => unreachable!(),
-			},
-			6 => match i {
-				0 => T::num_cast_from(Self::from(u64x2_extract_lane::<0>(self.0))),
-				1 => T::num_cast_from(Self::from(u64x2_extract_lane::<1>(self.0))),
-				_ => unreachable!(),
-			},
-			_ => unreachable!(),
-		}
-	}
 }
 
 impl<Scalar: BinaryField> Broadcast<Scalar> for PackedPrimitiveType<M128, Scalar>
@@ -492,12 +437,6 @@ impl UnderlierWithBitConstants for M128 {
 		}
 	}
 }
-
-impl_iteration!(M128,
-	@strategy BitIterationStrategy, U1,
-	@strategy FallbackStrategy, U2, U4,
-	@strategy DivisibleStrategy, u8, u16, u32, u64, u128, M128,
-);
 
 impl<Scalar: BinaryField> From<u128> for PackedPrimitiveType<M128, Scalar> {
 	#[inline]

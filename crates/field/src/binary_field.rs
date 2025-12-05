@@ -451,28 +451,26 @@ macro_rules! impl_field_extension {
 
 			#[inline]
 			fn iter_bases(&self) -> impl Iterator<Item = $subfield_name> {
-				use $crate::underlier::{WithUnderlier, IterationMethods, IterationStrategy};
 				use binius_utils::iter::IterExtensions;
+				use $crate::underlier::{Divisible, WithUnderlier};
 
-				IterationMethods::<<$subfield_name as WithUnderlier>::Underlier, Self::Underlier>::ref_iter(&self.0)
+				Divisible::<<$subfield_name as WithUnderlier>::Underlier>::ref_iter(&self.0)
 					.map_skippable($subfield_name::from)
 			}
 
 			#[inline]
 			fn into_iter_bases(self) -> impl Iterator<Item = $subfield_name> {
-				use $crate::underlier::{WithUnderlier, IterationMethods, IterationStrategy};
 				use binius_utils::iter::IterExtensions;
+				use $crate::underlier::{Divisible, WithUnderlier};
 
-				IterationMethods::<<$subfield_name as WithUnderlier>::Underlier, Self::Underlier>::value_iter(self.0)
+				Divisible::<<$subfield_name as WithUnderlier>::Underlier>::value_iter(self.0)
 					.map_skippable($subfield_name::from)
 			}
 
 			#[inline]
 			unsafe fn get_base_unchecked(&self, i: usize) -> $subfield_name {
-				use $crate::underlier::{WithUnderlier, UnderlierWithBitOps};
-				unsafe {
-					$subfield_name::from_underlier(self.to_underlier().get_subvalue(i))
-				}
+				use $crate::underlier::{UnderlierWithBitOps, WithUnderlier};
+				unsafe { $subfield_name::from_underlier(self.to_underlier().get_subvalue(i)) }
 			}
 
 			#[inline]

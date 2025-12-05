@@ -5,7 +5,7 @@ use std::array;
 use binius_utils::checked_arithmetics::checked_int_div;
 
 use crate::{
-	BinaryField, PackedField, TowerField,
+	BinaryField, Divisible, PackedField, TowerField,
 	arch::{
 		GfniStrategy,
 		portable::packed::PackedPrimitiveType,
@@ -15,7 +15,7 @@ use crate::{
 	is_aes_tower,
 	linear_transformation::{FieldLinearTransformation, Transformation},
 	packed::PackedBinaryField,
-	underlier::{Divisible, UnderlierType, WithUnderlier},
+	underlier::{UnderlierType, WithUnderlier},
 };
 
 #[rustfmt::skip]
@@ -104,9 +104,7 @@ where
 	Data: AsRef<[OF]> + Sync,
 {
 	transpose_8x8(i64::from_le_bytes(array::from_fn(|k| {
-		transformation.bases()[k + 8 * col]
-			.to_underlier()
-			.split_ref()[row]
+		transformation.bases()[k + 8 * col].to_underlier().get(row)
 	})))
 }
 
