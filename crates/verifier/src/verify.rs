@@ -173,15 +173,11 @@ where
 		transcript.observe().write_slice(public);
 
 		// Create channel and delegate to verify_iop
-		let channel = self.iop_compiler.create_channel(transcript);
-		self.verify_iop(public, channel)
+		let mut channel = self.iop_compiler.create_channel(transcript);
+		self.verify_iop(public, &mut channel)
 	}
 
-	fn verify_iop<Channel>(
-		&self,
-		public: &[Word],
-		mut channel: Channel,
-	) -> Result<Channel::Finish, Error>
+	fn verify_iop<Channel>(&self, public: &[Word], channel: &mut Channel) -> Result<(), Error>
 	where
 		Channel: IOPVerifierChannel<B128, Elem = B128>,
 	{
@@ -205,11 +201,8 @@ where
 		)
 		.entered();
 		let log_n_constraints = checked_log_2(self.constraint_system.n_mul_constraints());
-		let intmul_output = verify_intmul_reduction::<B128, _>(
-			LOG_WORD_SIZE_BITS,
-			log_n_constraints,
-			&mut channel,
-		)?;
+		let intmul_output =
+			verify_intmul_reduction::<B128, _>(LOG_WORD_SIZE_BITS, log_n_constraints, channel)?;
 		drop(intmul_guard);
 
 		// [phase] Verify BitAnd Reduction - AND constraint verification
@@ -229,7 +222,7 @@ where
 				z_challenge,
 				eval_point,
 			}: AndCheckOutput<B128> =
-				verify_bitand_reduction(log_n_constraints, &extended_subspace, &mut channel)?;
+				verify_bitand_reduction(log_n_constraints, &extended_subspace, channel)?;
 			OperatorData::new(z_challenge, eval_point, [a_eval, b_eval, c_eval])
 		};
 		drop(bitand_guard);
@@ -268,13 +261,8 @@ where
 			perfetto_category = "phase"
 		)
 		.entered();
-		let shift_output = shift::verify(
-			self.constraint_system(),
-			public,
-			&bitand_claim,
-			&intmul_claim,
-			&mut channel,
-		)?;
+		let shift_output =
+			shift::verify(self.constraint_system(), public, &bitand_claim, &intmul_claim, channel)?;
 		drop(constraint_guard);
 
 		// [phase] Verify Public Input - public input verification
@@ -306,7 +294,7 @@ where
 		let ring_switch::RingSwitchVerifyOutput {
 			eq_r_double_prime,
 			sumcheck_claim,
-		} = ring_switch::verify(shift_output.witness_eval(), &eval_point, &mut channel)?;
+		} = ring_switch::verify(shift_output.witness_eval(), &eval_point, channel)?;
 
 		// Build the transparent closure for the ring-switching equality indicator
 		let log_packing = <B128 as ExtensionField<B1>>::LOG_DEGREE;
@@ -315,8 +303,8 @@ where
 			ring_switch::eval_rs_eq(&eval_point_high, point, eq_r_double_prime.as_ref())
 		});
 
-		// Finish via channel (runs BaseFold internally and verifies the product check)
-		let finish = channel.finish(&[OracleLinearRelation {
+		// Verify oracle relations (runs BaseFold internally and verifies the product check)
+		channel.verify_oracle_relations([OracleLinearRelation {
 			oracle: trace_oracle,
 			transparent,
 			claim: sumcheck_claim,
@@ -324,7 +312,7 @@ where
 
 		drop(pcs_guard);
 
-		Ok(finish)
+		Ok(())
 	}
 }
 

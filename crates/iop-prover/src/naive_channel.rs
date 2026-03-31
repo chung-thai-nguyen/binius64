@@ -120,7 +120,6 @@ where
 	Challenger_: Challenger,
 {
 	type Oracle = NaiveOracle;
-	type Finish = ();
 
 	fn remaining_oracle_specs(&self) -> &[OracleSpec] {
 		&self.oracle_specs[self.next_oracle_index..]
@@ -149,7 +148,7 @@ where
 			.message()
 			.write_scalar_iter(buffer.iter_scalars());
 
-		// Store the buffer for use in finish()
+		// Store the buffer for use in prove_oracle_relations()
 		let stored_buffer =
 			FieldBuffer::new(buffer.log_len(), buffer.as_ref().to_vec().into_boxed_slice());
 		self.stored_oracles.push(StoredOracleData {
@@ -161,10 +160,13 @@ where
 		NaiveOracle { index }
 	}
 
-	fn finish(mut self, oracle_relations: &[(Self::Oracle, FieldBuffer<P>, P::Scalar)]) {
+	fn prove_oracle_relations(
+		&mut self,
+		oracle_relations: impl IntoIterator<Item = (Self::Oracle, FieldBuffer<P>, P::Scalar)>,
+	) {
 		assert!(
 			self.remaining_oracle_specs().is_empty(),
-			"finish called but {} oracle specs remaining",
+			"prove_oracle_relations called but {} oracle specs remaining",
 			self.remaining_oracle_specs().len()
 		);
 
@@ -187,9 +189,9 @@ where
 			// Debug assertion: prover should provide consistent eval claims
 			let stored = &self.stored_oracles[index];
 			let witness_poly = stored.buffer.to_ref();
-			let actual_eval: F = inner_product_buffers(&witness_poly, transparent_poly);
+			let actual_eval: F = inner_product_buffers(&witness_poly, &transparent_poly);
 			debug_assert_eq!(
-				actual_eval, *eval_claim,
+				actual_eval, eval_claim,
 				"NaiveProverChannel: eval_claim mismatch for oracle {index}"
 			);
 		}

@@ -207,7 +207,6 @@ where
 	Challenger_: Challenger,
 {
 	type Oracle = BaseFoldOracle;
-	type Finish = ();
 
 	fn remaining_oracle_specs(&self) -> &[OracleSpec] {
 		&self.oracle_specs[self.next_oracle_index..]
@@ -257,10 +256,13 @@ where
 		BaseFoldOracle { index }
 	}
 
-	fn finish(self, oracle_relations: &[(Self::Oracle, FieldBuffer<P>, P::Scalar)]) {
+	fn prove_oracle_relations(
+		&mut self,
+		oracle_relations: impl IntoIterator<Item = (Self::Oracle, FieldBuffer<P>, P::Scalar)>,
+	) {
 		assert!(
 			self.remaining_oracle_specs().is_empty(),
-			"finish called but {} oracle specs remaining",
+			"prove_oracle_relations called but {} oracle specs remaining",
 			self.remaining_oracle_specs().len()
 		);
 
@@ -289,8 +291,8 @@ where
 			// Run BaseFold proof (non-ZK variant).
 			let prover = BaseFoldProver::new(
 				committed_data.message.clone(),
-				transparent_poly.clone(),
-				*eval_claim,
+				transparent_poly,
+				eval_claim,
 				fri_folder,
 			);
 			prover
@@ -407,7 +409,7 @@ mod tests {
 		let oracle_2 = prover_channel.send_oracle(buffer_2.to_ref());
 		assert_eq!(oracle_2.index, 1);
 
-		prover_channel.finish(&[
+		prover_channel.prove_oracle_relations([
 			(oracle_1, transparent_poly_1, eval_claim_1),
 			(oracle_2, transparent_poly_2, eval_claim_2),
 		]);

@@ -191,8 +191,8 @@ where
 		transcript: &mut VerifierTranscript<Challenger_>,
 	) -> Result<(), Error> {
 		// Create channel and delegate to verify_iop
-		let channel = self.basefold_compiler.create_channel(transcript);
-		self.verify_iop(public, channel)
+		let mut channel = self.basefold_compiler.create_channel(transcript);
+		self.verify_iop(public, &mut channel)
 	}
 
 	/// Verifies a proof using an IOP channel.
@@ -208,13 +208,10 @@ where
 	/// # Returns
 	///
 	/// `Ok(())` if the proof is valid, `Err(_)` otherwise.
-	pub fn verify_iop<Channel>(
-		&self,
-		public: &[F],
-		mut channel: Channel,
-	) -> Result<Channel::Finish, Error>
+	pub fn verify_iop<Channel>(&self, public: &[F], channel: &mut Channel) -> Result<(), Error>
 	where
 		Channel: IOPVerifierChannel<F>,
+		Channel::Elem: 'static,
 	{
 		let _verify_guard =
 			tracing::info_span!("Verify", operation = "verify", perfetto_category = "operation")
@@ -246,7 +243,7 @@ where
 			c_eval,
 			mask_eval,
 			r_x,
-		} = self.verify_mulcheck(&mut channel)?;
+		} = self.verify_mulcheck(channel)?;
 
 		// Sample the public input check challenge and evaluate the public input at the challenge
 		// point.
@@ -260,7 +257,7 @@ where
 			&r_public,
 			&[a_eval, b_eval, c_eval],
 			public_eval,
-			&mut channel,
+			channel,
 		);
 
 		// Build the transparent closure for the wiring oracle relation
@@ -275,8 +272,8 @@ where
 		// Build the transparent closure for the mask oracle relation
 		let mask_transparent = self.mask_transparent(&r_x);
 
-		// Finish the protocol with both oracle relations
-		let finish = channel.finish(&[
+		// Verify both oracle relations (checks are done inside verify_oracle_relations)
+		channel.verify_oracle_relations([
 			OracleLinearRelation {
 				oracle: trace_oracle,
 				transparent: trace_transparent,
@@ -289,7 +286,7 @@ where
 			},
 		])?;
 
-		Ok(finish)
+		Ok(())
 	}
 
 	fn verify_mulcheck<C>(&self, channel: &mut C) -> Result<MulcheckOutput<C::Elem>, Error>
@@ -326,10 +323,10 @@ where
 	}
 
 	/// Returns a closure that evaluates the mask transparent polynomial at a given point.
-	fn mask_transparent<'a, E: FieldOps + 'a>(
+	fn mask_transparent<E: FieldOps + 'static>(
 		&self,
 		r_x: &[E],
-	) -> binius_iop::channel::TransparentEvalFn<'a, E> {
+	) -> binius_iop::channel::TransparentEvalFn<E> {
 		let (_m_n, m_d) = self.mask_dims;
 		let n_vars = r_x.len();
 		let mask_degree = 2; // quadratic composition

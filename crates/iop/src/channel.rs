@@ -38,7 +38,7 @@ pub struct OracleSpec {
 }
 
 /// A boxed closure that evaluates a transparent MLE at a given point.
-pub type TransparentEvalFn<'a, Elem> = Box<dyn Fn(&[Elem]) -> Elem + 'a>;
+pub type TransparentEvalFn<Elem> = Box<dyn Fn(&[Elem]) -> Elem>;
 
 /// An oracle linear relation specifying an inner product claim between a committed oracle
 /// polynomial and a transparent polynomial.
@@ -46,14 +46,14 @@ pub type TransparentEvalFn<'a, Elem> = Box<dyn Fn(&[Elem]) -> Elem + 'a>;
 /// The claim asserts that `<oracle_poly, transparent_poly> = claim`, where `transparent_poly` is
 /// the multilinear extension defined by the `transparent` closure evaluated at the challenge point
 /// sampled during the protocol.
-pub struct OracleLinearRelation<'a, Oracle, Elem> {
+pub struct OracleLinearRelation<Oracle, Elem> {
 	/// The oracle handle for the committed polynomial.
 	pub oracle: Oracle,
 	/// A closure that evaluates the transparent MLE at a given point.
 	///
-	/// The closure receives the challenge point (sampled during `finish`) and returns the
-	/// evaluation of the transparent polynomial's MLE at that point.
-	pub transparent: TransparentEvalFn<'a, Elem>,
+	/// The closure receives the challenge point (sampled during `verify_oracle_relations`) and
+	/// returns the evaluation of the transparent polynomial's MLE at that point.
+	pub transparent: TransparentEvalFn<Elem>,
 	/// The claimed inner product of the oracle polynomial and the transparent polynomial.
 	pub claim: Elem,
 }
@@ -69,10 +69,10 @@ pub struct OracleLinearRelation<'a, Oracle, Elem> {
 /// # Contract
 ///
 /// The caller must call `recv_oracle()` exactly `remaining_oracle_specs().len()` times before
-/// calling `finish()`. The oracles must be received in order and match their specifications.
+/// calling `verify_oracle_relations()`. The oracles must be received in order and match their
+/// specifications.
 pub trait IOPVerifierChannel<F: Field>: IPVerifierChannel<F> {
 	type Oracle: Clone;
-	type Finish;
 
 	/// Returns the specifications for the remaining oracles to be received.
 	///
@@ -86,7 +86,7 @@ pub trait IOPVerifierChannel<F: Field>: IPVerifierChannel<F> {
 	/// `remaining_oracle_specs()` must be non-empty.
 	fn recv_oracle(&mut self) -> Result<Self::Oracle, Error>;
 
-	/// Finishes the protocol by opening all oracle relations and verifying them.
+	/// Verifies all oracle linear relations by running opening protocols.
 	///
 	/// For each oracle relation, this method:
 	/// 1. Runs the opening protocol (e.g., BaseFold) to obtain the oracle evaluation and challenge
@@ -100,8 +100,8 @@ pub trait IOPVerifierChannel<F: Field>: IPVerifierChannel<F> {
 	/// * `remaining_oracle_specs()` must be empty (all oracles received).
 	/// * All oracle handles in `oracle_relations` must be valid handles returned by
 	///   `recv_oracle()`.
-	fn finish(
-		self,
-		oracle_relations: &[OracleLinearRelation<'_, Self::Oracle, Self::Elem>],
-	) -> Result<Self::Finish, Error>;
+	fn verify_oracle_relations(
+		&mut self,
+		oracle_relations: impl IntoIterator<Item = OracleLinearRelation<Self::Oracle, Self::Elem>>,
+	) -> Result<(), Error>;
 }
