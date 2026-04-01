@@ -28,6 +28,7 @@
 pub mod basefold;
 pub mod basefold_channel;
 pub mod basefold_compiler;
+pub mod basefold_extract;
 pub mod basefold_zk_channel;
 pub mod channel;
 pub mod fri;

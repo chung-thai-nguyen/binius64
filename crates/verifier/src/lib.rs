@@ -35,8 +35,10 @@
 pub mod and_reduction;
 pub mod config;
 mod error;
+pub mod pcs_extract;
 pub mod protocols;
 pub mod ring_switch;
+pub mod ring_switch_extract;
 mod verify;
 
 pub use binius_hash as hash;
