@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use binius_field::{BinaryField128bGhash, PackedBinaryGhash1x128b};
+use binius_field::{BinaryField128bGhash, Field, PackedBinaryGhash1x128b};
 use binius_hash::{ParallelCompressionAdaptor, StdCompression, StdDigest};
 use binius_iop::{
 	basefold as verifier_basefold,
@@ -49,10 +49,8 @@ struct BenchCase {
 	fri_params: fri::FRIParams<F>,
 	merkle_scheme: MerkleScheme,
 	proof_bytes: Vec<u8>,
-	extract_params: ExtractFriParams,
-	extract_commitment: [u8; 32],
-	ring_switch_channel: ring_switch_extract::ExtractRingSwitchChannel,
-	basefold_oracle: basefold_extract::ExtractProofOracle,
+	extract_statement: pcs_extract::ExtractPcsStatement,
+	extract_transcript: pcs_extract::ExtractPcsTranscriptView,
 }
 
 fn digest_to_extract(digest: impl AsRef<[u8]>) -> [u8; 32] {
@@ -132,7 +130,7 @@ fn extract_basefold_oracle(
 	merkle_scheme: &MerkleScheme,
 	codeword_commitment: [u8; 32],
 	transcript: &mut VerifierTranscript<StdChallenger>,
-) -> Result<basefold_extract::ExtractProofOracle> {
+) -> Result<basefold_extract::ExtractBasefoldTranscriptView> {
 	let mut oracle = basefold_extract::ExtractProofOracle::default();
 	let commit_rounds = calculate_commit_rounds(
 		fri_params.log_batch_size(),
@@ -244,7 +242,21 @@ fn extract_basefold_oracle(
 		}
 	}
 
-	Ok(oracle)
+	Ok(basefold_extract::ExtractBasefoldTranscriptView {
+		proof: basefold_extract::ExtractBasefoldProofView {
+			round_coeffs: oracle.round_coeffs,
+			commitments: oracle.commitments,
+			decommitment_scalars: oracle.decommitment_scalars,
+			decommitments: oracle.decommitments,
+			merkle_vectors: oracle.merkle_vectors,
+			merkle_openings: oracle.merkle_openings,
+			merkle_layers: oracle.merkle_layers,
+		},
+		sampling: basefold_extract::ExtractBasefoldSamplingView {
+			challenges: oracle.challenges,
+			query_indices: oracle.query_indices,
+		},
+	})
 }
 
 fn extract_scripted_inputs(
@@ -253,8 +265,8 @@ fn extract_scripted_inputs(
 	proof_bytes: Vec<u8>,
 ) -> Result<(
 	[u8; 32],
-	ring_switch_extract::ExtractRingSwitchChannel,
-	basefold_extract::ExtractProofOracle,
+	ring_switch_extract::ExtractRingSwitchTranscriptView,
+	basefold_extract::ExtractBasefoldTranscriptView,
 )> {
 	let mut transcript = VerifierTranscript::new(StdChallenger::default(), proof_bytes);
 	let codeword_commitment: MerkleDigest = transcript.message().read()?;
@@ -270,10 +282,14 @@ fn extract_scripted_inputs(
 
 	Ok((
 		codeword_commitment,
-		ring_switch_extract::ExtractRingSwitchChannel::new(
-			ring_switch_messages,
-			ring_switch_challenges,
-		),
+		ring_switch_extract::ExtractRingSwitchTranscriptView {
+			proof: ring_switch_extract::ExtractRingSwitchProofView {
+				messages: ring_switch_messages,
+			},
+			sampling: ring_switch_extract::ExtractRingSwitchSamplingView {
+				challenges: ring_switch_challenges,
+			},
+		},
 		basefold_oracle,
 	))
 }
@@ -341,21 +357,24 @@ fn make_bench_case() -> Result<BenchCase> {
 		live_ring_switch.sumcheck_claim,
 		&mut live_transcript,
 	)?;
-	let mut query_point = live_basefold.challenges.clone();
-	query_point.reverse();
-	let live_transparent_eval = verifier_ring_switch::eval_rs_eq(
-		&eval_point[LOG_PACKING..],
-		&query_point,
-		live_ring_switch.eq_r_double_prime.as_ref(),
-	);
+	let live_opened = live_basefold.opened_linear_relation();
+	let live_transparent_eval = live_ring_switch.relation.eval(&live_opened.query_point);
 	ensure!(live_ring_switch.sumcheck_claim == expected_sumcheck_claim);
-	ensure!(
-		live_basefold.final_sumcheck_value == live_basefold.final_fri_value * live_transparent_eval
-	);
+	ensure!(live_opened.consistency_error(live_transparent_eval) == F::ZERO);
 
 	let extract_params = extract_fri_params(fri_params, merkle_scheme);
-	let (extract_commitment, ring_switch_channel, basefold_oracle) =
+	let (extract_commitment, ring_switch_transcript, basefold_transcript) =
 		extract_scripted_inputs(fri_params, merkle_scheme, proof_bytes.clone())?;
+	let extract_statement = pcs_extract::ExtractPcsStatement {
+		params: extract_params,
+		codeword_commitment: extract_commitment,
+		witness_eval: evaluation_claim,
+		eval_point: eval_point.clone(),
+	};
+	let extract_transcript = pcs_extract::ExtractPcsTranscriptView {
+		ring_switch: ring_switch_transcript,
+		basefold: basefold_transcript,
+	};
 
 	Ok(BenchCase {
 		evaluation_claim,
@@ -363,10 +382,8 @@ fn make_bench_case() -> Result<BenchCase> {
 		fri_params: fri_params.clone(),
 		merkle_scheme: merkle_scheme.clone(),
 		proof_bytes,
-		extract_params,
-		extract_commitment,
-		ring_switch_channel,
-		basefold_oracle,
+		extract_statement,
+		extract_transcript,
 	})
 }
 
@@ -386,48 +403,53 @@ fn verify_live(
 		ring_switch_output.sumcheck_claim,
 		&mut transcript,
 	)?;
-	let mut query_point = basefold_output.challenges.clone();
-	query_point.reverse();
-	let transparent_eval = verifier_ring_switch::eval_rs_eq(
-		&case.eval_point[LOG_PACKING..],
-		&query_point,
-		ring_switch_output.eq_r_double_prime.as_ref(),
-	);
+	let opened = basefold_output.opened_linear_relation();
+	let transparent_eval = ring_switch_output.relation.eval(&opened.query_point);
 
 	Ok((ring_switch_output, basefold_output, transparent_eval))
 }
 
+fn normalize_live_output(
+	ring_switch_output: verifier_ring_switch::RingSwitchVerifyOutput<F>,
+	basefold_output: verifier_basefold::ReducedOutput<F>,
+	transparent_eval: F,
+) -> pcs_extract::ExtractPcsOpeningOutput {
+	let verifier_basefold::OpenedLinearRelationWithSampling { opened, sampling } =
+		basefold_output.into_opened_linear_relation_with_sampling();
+	binius_verifier::pcs::PcsOpeningOutput::<F, verifier_ring_switch::RingSwitchEqRelation<F>> {
+		relation: ring_switch_output.relation,
+		sumcheck_claim: ring_switch_output.sumcheck_claim,
+		opened,
+		sampling,
+		transparent_eval,
+	}
+	.into()
+}
+
 fn verify_replay_preparsed(case: &BenchCase) -> Result<pcs_extract::ExtractPcsOpeningOutput> {
-	let mut ring_switch_channel = case.ring_switch_channel.clone();
-	let mut basefold_oracle = case.basefold_oracle.clone();
-	let replay = pcs_extract::verify_scripted_128b_ghash_extract(
-		&case.extract_params,
-		case.extract_commitment,
-		case.evaluation_claim,
-		&case.eval_point,
-		&mut ring_switch_channel,
-		&mut basefold_oracle,
-	)
+	let replay = case
+		.extract_statement
+		.verify_transcript(&case.extract_transcript)
 	.map_err(|err| anyhow::anyhow!("replay verification failed: {err:?}"))?;
-	ensure!(ring_switch_channel.is_consumed());
-	ensure!(basefold_oracle.is_consumed());
 	Ok(replay)
 }
 
 fn verify_replay_with_parse(case: &BenchCase) -> Result<pcs_extract::ExtractPcsOpeningOutput> {
-	let (extract_commitment, mut ring_switch_channel, mut basefold_oracle) =
+	let (extract_commitment, ring_switch_transcript, basefold_transcript) =
 		extract_scripted_inputs(&case.fri_params, &case.merkle_scheme, case.proof_bytes.clone())?;
-	let replay = pcs_extract::verify_scripted_128b_ghash_extract(
-		&case.extract_params,
-		extract_commitment,
-		case.evaluation_claim,
-		&case.eval_point,
-		&mut ring_switch_channel,
-		&mut basefold_oracle,
-	)
+	let extract_statement = pcs_extract::ExtractPcsStatement {
+		params: extract_fri_params(&case.fri_params, &case.merkle_scheme),
+		codeword_commitment: extract_commitment,
+		witness_eval: case.evaluation_claim,
+		eval_point: case.eval_point.clone(),
+	};
+	let extract_transcript = pcs_extract::ExtractPcsTranscriptView {
+		ring_switch: ring_switch_transcript,
+		basefold: basefold_transcript,
+	};
+	let replay = extract_statement
+		.verify_transcript(&extract_transcript)
 	.map_err(|err| anyhow::anyhow!("replay verification failed: {err:?}"))?;
-	ensure!(ring_switch_channel.is_consumed());
-	ensure!(basefold_oracle.is_consumed());
 	Ok(replay)
 }
 
@@ -435,15 +457,37 @@ fn verify_replay_with_parse(case: &BenchCase) -> Result<pcs_extract::ExtractPcsO
 fn pcs_extract_matches_transcript_backed_slice() -> Result<()> {
 	let case = make_bench_case()?;
 	let (live_ring_switch, live_basefold, live_transparent_eval) = verify_live(&case)?;
+	let live = normalize_live_output(live_ring_switch, live_basefold, live_transparent_eval);
 	let replay = verify_replay_preparsed(&case)?;
 
-	assert_eq!(replay.eq_r_double_prime.as_slice(), live_ring_switch.eq_r_double_prime.as_ref());
-	assert_eq!(replay.sumcheck_claim, live_ring_switch.sumcheck_claim);
-	assert_eq!(replay.final_fri_value, live_basefold.final_fri_value);
-	assert_eq!(replay.final_sumcheck_value, live_basefold.final_sumcheck_value);
-	assert_eq!(replay.challenges, live_basefold.challenges);
-	assert_eq!(replay.transparent_eval, live_transparent_eval);
+	assert_eq!(replay, live);
 
+	Ok(())
+}
+
+#[test]
+fn pcs_extract_rejects_corrupted_ring_switch_input() -> Result<()> {
+	let case = make_bench_case()?;
+	let mut extract_transcript = case.extract_transcript.clone();
+	extract_transcript.ring_switch.proof.messages[0] += F::ONE;
+
+	let replay =
+		case.extract_statement.verify_transcript(&extract_transcript);
+
+	assert_eq!(replay, Err(pcs_extract::ExtractError::RingSwitchFailure));
+	Ok(())
+}
+
+#[test]
+fn pcs_extract_rejects_corrupted_basefold_opening() -> Result<()> {
+	let case = make_bench_case()?;
+	let mut extract_transcript = case.extract_transcript.clone();
+	extract_transcript.basefold.proof.merkle_openings[0].values[0] += F::ONE;
+
+	let replay =
+		case.extract_statement.verify_transcript(&extract_transcript);
+
+	assert_eq!(replay, Err(pcs_extract::ExtractError::BaseFoldFailure));
 	Ok(())
 }
 

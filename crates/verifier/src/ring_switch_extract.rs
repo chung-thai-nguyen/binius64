@@ -6,9 +6,12 @@
 //! intended for extraction experiments where the generic `IPVerifierChannel` boundary is already
 //! semantically right but a plain-data interpreter is more reliable for current extraction tools.
 
-use binius_field::BinaryField128bGhash;
+use binius_iop::basefold_extract::F;
+use binius_iop::protocol_boundary::StatementTranscriptProtocol;
 
-pub type ExtractField = BinaryField128bGhash;
+use crate::pcs::RingSwitchEqRelation as NormalizedRingSwitchEqRelation;
+use crate::ring_switch;
+
 pub(crate) const LOG_PACKING: usize = 7;
 pub(crate) const PACKING_DEGREE: usize = 1 << LOG_PACKING;
 
@@ -16,10 +19,40 @@ pub(crate) const PACKING_DEGREE: usize = 1 << LOG_PACKING;
 pub enum ExtractError {
 	MissingObject,
 	InvalidAssert,
+	UnconsumedTranscript,
 }
 
+/// Monomorphic RingSwitch statement exported to Hax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractRingSwitchStatement<F: ExtractField> {
+	pub witness_eval: F,
+	pub eval_point: Vec<ExtractField>,
+}
+
+/// Monomorphic prover-message view for RingSwitch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractRingSwitchProofView<F: ExtractField> {
+	pub messages: Vec<ExtractField>,
+}
+
+/// Monomorphic verifier-randomness view for RingSwitch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractRingSwitchSamplingView<F: ExtractField> {
+	pub challenges: Vec<ExtractField>,
+}
+
+/// Monomorphic public-coin interaction view for RingSwitch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractRingSwitchTranscriptView<F: ExtractField> {
+	pub proof: ExtractRingSwitchProofView<F>,
+	pub sampling: ExtractRingSwitchSamplingView<F>,
+}
+
+/// Thin protocol-boundary marker for the extraction-oriented RingSwitch verifier.
+pub struct ExtractRingSwitchProtocol<F: ExtractField>;
+
 #[derive(Debug, Clone, Default)]
-pub struct ExtractRingSwitchChannel {
+pub struct ExtractRingSwitchChannel<F: ExtractField> {
 	pub messages: Vec<ExtractField>,
 	pub challenges: Vec<ExtractField>,
 
@@ -27,7 +60,7 @@ pub struct ExtractRingSwitchChannel {
 	challenge_pos: usize,
 }
 
-impl ExtractRingSwitchChannel {
+impl<F: ExtractField> ExtractRingSwitchChannel<F> {
 	pub fn new(messages: Vec<ExtractField>, challenges: Vec<ExtractField>) -> Self {
 		Self {
 			messages,
@@ -57,8 +90,8 @@ impl ExtractRingSwitchChannel {
 		}
 	}
 
-	pub fn assert_zero(&mut self, value: ExtractField) -> Result<(), ExtractError> {
-		if value == ExtractField::new(0) {
+	pub fn assert_zero(&mut self, value: F) -> Result<(), ExtractError> {
+		if value == F::ZERO {
 			Ok(())
 		} else {
 			Err(ExtractError::InvalidAssert)
@@ -70,16 +103,103 @@ impl ExtractRingSwitchChannel {
 	}
 }
 
+impl From<&ExtractRingSwitchTranscriptView<F>> for ExtractRingSwitchChannel<F> {
+	fn from(value: &ExtractRingSwitchTranscriptView<F>) -> Self {
+		Self::new(
+			value.proof.messages.clone(),
+			value.sampling.challenges.clone(),
+		)
+	}
+}
+
+/// Monomorphic RingSwitch relation exported to Hax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchOutput {
+pub struct ExtractRingSwitchEqRelation<F: ExtractField> {
+	pub eval_point_high: Vec<ExtractField>,
 	pub eq_r_double_prime: Vec<ExtractField>,
-	pub sumcheck_claim: ExtractField,
+}
+
+impl From<NormalizedRingSwitchEqRelation<ExtractField>> for ExtractRingSwitchEqRelation<F> {
+	fn from(value: NormalizedRingSwitchEqRelation<ExtractField>) -> Self {
+		Self {
+			eval_point_high: value.eval_point_high,
+			eq_r_double_prime: value.eq_r_double_prime,
+		}
+	}
+}
+
+impl From<ring_switch::RingSwitchEqRelation<ExtractField>> for ExtractRingSwitchEqRelation<F> {
+	fn from(value: ring_switch::RingSwitchEqRelation<ExtractField>) -> Self {
+		NormalizedRingSwitchEqRelation::from(value).into()
+	}
+}
+
+impl From<ExtractRingSwitchEqRelation<F>> for NormalizedRingSwitchEqRelation<ExtractField> {
+	fn from(value: ExtractRingSwitchEqRelation<F>) -> Self {
+		Self {
+			eval_point_high: value.eval_point_high,
+			eq_r_double_prime: value.eq_r_double_prime,
+		}
+	}
+}
+
+pub fn eval_relation_extract(
+	relation: &ExtractRingSwitchEqRelation<F>,
+	query: &[F],
+) -> F {
+	eval_rs_eq_extract(&relation.eval_point_high, query, &relation.eq_r_double_prime)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractRingSwitchOutput<F: ExtractField> {
+	pub relation: ExtractRingSwitchEqRelation<F>,
+	pub sumcheck_claim: F,
+}
+
+impl<F: ExtractField> ExtractRingSwitchStatement<F> {
+	pub fn verify_transcript(
+		&self,
+		transcript: &ExtractRingSwitchTranscriptView<F>,
+	) -> Result<ExtractRingSwitchOutput<F>, ExtractError> {
+		ExtractRingSwitchProtocol<F>::verify_statement_transcript(self, transcript)
+	}
+}
+
+impl StatementTranscriptProtocol for ExtractRingSwitchProtocol<F> {
+	type Statement = ExtractRingSwitchStatement<F>;
+	type TranscriptView = ExtractRingSwitchTranscriptView<F>;
+	type Output = ExtractRingSwitchOutput<F>;
+	type Error = ExtractError;
+
+	fn verify_statement_transcript(
+		statement: &Self::Statement,
+		transcript: &Self::TranscriptView,
+	) -> Result<Self::Output, Self::Error> {
+		verify_statement_transcript_extract(statement, transcript)
+	}
+}
+
+pub fn verify_statement_transcript_extract(
+	statement: &ExtractRingSwitchStatement<F>,
+	transcript: &ExtractRingSwitchTranscriptView<F>,
+) -> Result<ExtractRingSwitchOutput<F>, ExtractError> {
+	let mut channel = ExtractRingSwitchChannel<F>::from(transcript);
+	let output = verify_scripted_extract(
+		statement.witness_eval,
+		&statement.eval_point,
+		&mut channel,
+	)?;
+	if channel.is_consumed() {
+		Ok(output)
+	} else {
+		Err(ExtractError::UnconsumedTranscript)
+	}
 }
 
 pub(crate) fn evaluate_multilinear_scalars(
 	mut evals: Vec<ExtractField>,
-	point: &[ExtractField],
-) -> ExtractField {
+	point: &[F],
+) -> F {
 	assert_eq!(evals.len(), 1 << point.len(), "precondition: evals length must be 2^point.len()");
 
 	let mut log_half_len = point.len();
@@ -100,9 +220,9 @@ pub(crate) fn evaluate_multilinear_scalars(
 	evals[0]
 }
 
-pub(crate) fn eq_ind_partial_eval_scalars(point: &[ExtractField]) -> Vec<ExtractField> {
+pub(crate) fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 	let mut result = Vec::with_capacity(1);
-	result.push(ExtractField::new(1));
+	result.push(F::ONE);
 	let mut i = 0;
 	while i < point.len() {
 		let r_i = point[i];
@@ -129,7 +249,7 @@ pub(crate) fn eq_ind_partial_eval_scalars(point: &[ExtractField]) -> Vec<Extract
 	result
 }
 
-pub(crate) fn transpose_basis_rows(values: &[ExtractField]) -> Vec<ExtractField> {
+pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
 	assert_eq!(
 		values.len(),
 		PACKING_DEGREE,
@@ -145,7 +265,7 @@ pub(crate) fn transpose_basis_rows(values: &[ExtractField]) -> Vec<ExtractField>
 	let mut transposed = Vec::with_capacity(PACKING_DEGREE);
 	let mut init = 0;
 	while init < PACKING_DEGREE {
-		transposed.push(ExtractField::new(0));
+		transposed.push(F::ZERO);
 		init += 1;
 	}
 
@@ -180,11 +300,11 @@ pub(crate) fn transpose_basis_rows(values: &[ExtractField]) -> Vec<ExtractField>
 	transposed
 }
 
-pub(crate) fn eval_rs_eq_128b_ghash_extract(
-	z_vals: &[ExtractField],
-	query: &[ExtractField],
-	expanded_row_batch_query: &[ExtractField],
-) -> ExtractField {
+pub(crate) fn eval_rs_eq_extract(
+	z_vals: &[F],
+	query: &[F],
+	expanded_row_batch_query: &[F],
+) -> F {
 	assert_eq!(z_vals.len(), query.len(), "precondition: z_vals and query must be the same length");
 	assert_eq!(
 		expanded_row_batch_query.len(),
@@ -196,9 +316,9 @@ pub(crate) fn eval_rs_eq_128b_ghash_extract(
 	let mut init = 0;
 	while init < PACKING_DEGREE {
 		if init == 0 {
-			tensor_eval.push(ExtractField::new(1));
+			tensor_eval.push(F::ONE);
 		} else {
-			tensor_eval.push(ExtractField::new(0));
+			tensor_eval.push(F::ZERO);
 		}
 		init += 1;
 	}
@@ -237,7 +357,7 @@ pub(crate) fn eval_rs_eq_128b_ghash_extract(
 	}
 
 	let folded = transpose_basis_rows(&tensor_eval);
-	let mut acc = ExtractField::new(0);
+	let mut acc = F::ZERO;
 	let mut i = 0;
 	while i < PACKING_DEGREE {
 		acc = acc + folded[i] * expanded_row_batch_query[i];
@@ -246,12 +366,12 @@ pub(crate) fn eval_rs_eq_128b_ghash_extract(
 	acc
 }
 
-pub fn verify_scripted_128b_ghash_extract(
-	evaluation_claim: ExtractField,
-	eval_point: &[ExtractField],
-	channel: &mut ExtractRingSwitchChannel,
-) -> Result<ExtractRingSwitchOutput, ExtractError> {
-	let (eval_point_low, _eval_point_high) = eval_point.split_at(LOG_PACKING);
+pub fn verify_scripted_extract(
+	evaluation_claim: F,
+	eval_point: &[F],
+	channel: &mut ExtractRingSwitchChannel<F>,
+) -> Result<ExtractRingSwitchOutput<F>, ExtractError> {
+	let (eval_point_low, eval_point_high) = eval_point.split_at(LOG_PACKING);
 
 	let s_hat_v = channel.recv_many(PACKING_DEGREE)?;
 
@@ -264,8 +384,11 @@ pub fn verify_scripted_128b_ghash_extract(
 	let eq_r_double_prime = eq_ind_partial_eval_scalars(&r_double_prime);
 	let sumcheck_claim = evaluate_multilinear_scalars(s_hat_u, &r_double_prime);
 
-	Ok(ExtractRingSwitchOutput {
-		eq_r_double_prime,
+	Ok(ExtractRingSwitchOutput<F> {
+		relation: ExtractRingSwitchEqRelation<F> {
+			eval_point_high: eval_point_high.to_vec(),
+			eq_r_double_prime,
+		},
 		sumcheck_claim,
 	})
 }
@@ -277,9 +400,9 @@ mod tests {
 	use rand::{SeedableRng, rngs::StdRng};
 
 	use super::{
-		ExtractField, ExtractRingSwitchChannel, LOG_PACKING, PACKING_DEGREE,
-		eval_rs_eq_128b_ghash_extract, evaluate_multilinear_scalars,
-		verify_scripted_128b_ghash_extract,
+		F, ExtractRingSwitchChannel<F>, LOG_PACKING, PACKING_DEGREE,
+		eval_rs_eq_extract, evaluate_multilinear_scalars,
+		verify_scripted_extract,
 	};
 	use crate::ring_switch;
 
@@ -303,7 +426,7 @@ mod tests {
 	}
 
 	impl IPVerifierChannel<ExtractField> for GenericScriptedChannel {
-		type Elem = ExtractField;
+		type Elem = F;
 
 		fn recv_one(&mut self) -> Result<Self::Elem, binius_ip::channel::Error> {
 			if let Some(value) = self.messages.get(self.message_pos) {
@@ -332,16 +455,16 @@ mod tests {
 			value
 		}
 
-		fn observe_one(&mut self, val: ExtractField) -> Self::Elem {
+		fn observe_one(&mut self, val: F) -> Self::Elem {
 			val
 		}
 
-		fn observe_many(&mut self, vals: &[ExtractField]) -> Vec<Self::Elem> {
+		fn observe_many(&mut self, vals: &[F]) -> Vec<Self::Elem> {
 			vals.to_vec()
 		}
 
 		fn assert_zero(&mut self, val: Self::Elem) -> Result<(), binius_ip::channel::Error> {
-			if val == ExtractField::new(0) {
+			if val == F::ZERO {
 				Ok(())
 			} else {
 				Err(binius_ip::channel::Error::InvalidAssert)
@@ -364,21 +487,18 @@ mod tests {
 			ring_switch::verify(evaluation_claim, &eval_point, &mut channel).unwrap()
 		};
 
-		let mut extract_channel = ExtractRingSwitchChannel {
+		let mut extract_channel = ExtractRingSwitchChannel<F> {
 			messages: s_hat_v,
 			challenges: r_double_prime,
 			..Default::default()
 		};
 		let extract_output =
-			verify_scripted_128b_ghash_extract(evaluation_claim, &eval_point, &mut extract_channel)
+			verify_scripted_extract(evaluation_claim, &eval_point, &mut extract_channel)
 				.unwrap();
 
 		assert_eq!(
-			generic_output
-				.eq_r_double_prime
-				.iter_scalars()
-				.collect::<Vec<_>>(),
-			extract_output.eq_r_double_prime
+			generic_output.relation.eq_r_double_prime,
+			extract_output.relation.eq_r_double_prime
 		);
 		assert_eq!(generic_output.sumcheck_claim, extract_output.sumcheck_claim);
 		assert!(extract_channel.is_consumed());
@@ -393,7 +513,7 @@ mod tests {
 		let expanded_row_batch_query = random_scalars::<ExtractField>(&mut rng, PACKING_DEGREE);
 
 		let generic = ring_switch::eval_rs_eq(&z_vals, &query, &expanded_row_batch_query);
-		let extracted = eval_rs_eq_128b_ghash_extract(&z_vals, &query, &expanded_row_batch_query);
+		let extracted = eval_rs_eq_extract(&z_vals, &query, &expanded_row_batch_query);
 
 		assert_eq!(generic, extracted);
 	}

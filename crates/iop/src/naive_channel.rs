@@ -14,7 +14,9 @@ use binius_transcript::{
 	fiat_shamir::{CanSample, Challenger},
 };
 
-use crate::channel::{Error, IOPVerifierChannel, OracleLinearRelation, OracleSpec};
+use crate::channel::{
+	Error, IOPVerifierChannel, OracleCommitmentVerifierChannel, OracleLinearRelation, OracleSpec,
+};
 
 /// Oracle handle returned by [`NaiveVerifierChannel::recv_oracle`].
 #[derive(Debug, Clone, Copy)]
@@ -129,7 +131,7 @@ where
 	}
 }
 
-impl<F, Challenger_> IOPVerifierChannel<F> for NaiveVerifierChannel<'_, F, Challenger_>
+impl<F, Challenger_> OracleCommitmentVerifierChannel<F> for NaiveVerifierChannel<'_, F, Challenger_>
 where
 	F: Field,
 	Challenger_: Challenger,
@@ -164,7 +166,13 @@ where
 
 		Ok(NaiveOracle { index })
 	}
+}
 
+impl<F, Challenger_> IOPVerifierChannel<F> for NaiveVerifierChannel<'_, F, Challenger_>
+where
+	F: Field,
+	Challenger_: Challenger,
+{
 	fn verify_oracle_relations(
 		&mut self,
 		oracle_relations: impl IntoIterator<Item = OracleLinearRelation<Self::Oracle, F>>,

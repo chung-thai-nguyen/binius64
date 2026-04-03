@@ -5,7 +5,9 @@
 use std::{cell::RefCell, rc::Rc};
 
 use binius_field::{BinaryField128bGhash as B128, Field};
-use binius_iop::channel::{IOPVerifierChannel, OracleLinearRelation, OracleSpec};
+use binius_iop::channel::{
+	IOPVerifierChannel, OracleCommitmentVerifierChannel, OracleLinearRelation, OracleSpec,
+};
 use binius_ip::channel::IPVerifierChannel;
 use binius_spartan_frontend::circuit_builder::ConstraintBuilder;
 
@@ -78,7 +80,7 @@ impl IPVerifierChannel<B128> for IronSpartanBuilderChannel {
 	}
 }
 
-impl IOPVerifierChannel<B128> for IronSpartanBuilderChannel {
+impl OracleCommitmentVerifierChannel<B128> for IronSpartanBuilderChannel {
 	type Oracle = ();
 
 	fn remaining_oracle_specs(&self) -> &[OracleSpec] {
@@ -88,7 +90,9 @@ impl IOPVerifierChannel<B128> for IronSpartanBuilderChannel {
 	fn recv_oracle(&mut self) -> Result<Self::Oracle, binius_iop::channel::Error> {
 		Ok(())
 	}
+}
 
+impl IOPVerifierChannel<B128> for IronSpartanBuilderChannel {
 	fn verify_oracle_relations(
 		&mut self,
 		_oracle_relations: impl IntoIterator<Item = OracleLinearRelation<Self::Oracle, Self::Elem>>,

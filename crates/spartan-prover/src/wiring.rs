@@ -423,7 +423,10 @@ mod tests {
 	fn test_wiring_prove_verify() {
 		use binius_hash::StdDigest;
 		use binius_iop::{
-			channel::{IOPVerifierChannel, OracleLinearRelation, OracleSpec},
+			channel::{
+				IOPVerifierChannel, OracleCommitmentVerifierChannel, OracleLinearRelation,
+				OracleSpec,
+			},
 			naive_channel::NaiveVerifierChannel,
 		};
 		use binius_iop_prover::{channel::IOPProverChannel, naive_channel::NaiveProverChannel};

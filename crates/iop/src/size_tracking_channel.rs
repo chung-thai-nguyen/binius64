@@ -9,7 +9,10 @@ use binius_field::BinaryField;
 use binius_ip::channel::IPVerifierChannel;
 
 use crate::{
-	channel::{Error, IOPVerifierChannel, OracleLinearRelation, OracleSpec},
+	channel::{
+		Error, IOPVerifierChannel, OracleCommitmentVerifierChannel, OracleLinearRelation,
+		OracleSpec,
+	},
 	fri::{self, FRIParams},
 	merkle_tree::MerkleTreeScheme,
 };
@@ -117,7 +120,7 @@ impl<F: BinaryField, MerkleScheme_: MerkleTreeScheme<F>> IPVerifierChannel<F>
 	}
 }
 
-impl<F: BinaryField, MerkleScheme_: MerkleTreeScheme<F>> IOPVerifierChannel<F>
+impl<F: BinaryField, MerkleScheme_: MerkleTreeScheme<F>> OracleCommitmentVerifierChannel<F>
 	for SizeTrackingChannel<'_, F, MerkleScheme_>
 {
 	type Oracle = ();
@@ -131,7 +134,11 @@ impl<F: BinaryField, MerkleScheme_: MerkleTreeScheme<F>> IOPVerifierChannel<F>
 		self.next_oracle_index += 1;
 		Ok(())
 	}
+}
 
+impl<F: BinaryField, MerkleScheme_: MerkleTreeScheme<F>> IOPVerifierChannel<F>
+	for SizeTrackingChannel<'_, F, MerkleScheme_>
+{
 	fn verify_oracle_relations(
 		&mut self,
 		_oracle_relations: impl IntoIterator<Item = OracleLinearRelation<Self::Oracle, Self::Elem>>,

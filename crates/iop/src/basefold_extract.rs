@@ -9,11 +9,106 @@
 use binius_field::BinaryField128bGhash;
 
 use crate::basefold::ReducedOutput;
+use crate::fri::verify::{AuthenticatedFRIQueryPhase, OpenedFRIQuery, OpenedFRIQueryPhase};
+use crate::protocol_boundary::{
+	AuthenticatedStatementTranscriptProtocol, StatementTranscriptProtocol,
+};
 
-pub type ExtractField = BinaryField128bGhash;
+pub trait F: Copy + Clone + PartialEq {
+    const ZERO: Self;
+    const ONE: Self;
+    fn add(self, rhs: Self) -> Self;
+    fn mul(self, rhs: Self) -> Self;
+    fn sub(self, rhs: Self) -> Self;
+}
+
+impl<T: binius_field::Field> F for T {
+    const ZERO: Self = <T as binius_field::Field>::ZERO;
+    const ONE: Self = <T as binius_field::Field>::ONE;
+    fn add(self, rhs: Self) -> Self { self + rhs }
+    fn mul(self, rhs: Self) -> Self { self * rhs }
+    fn sub(self, rhs: Self) -> Self { self - rhs }
+}
 pub type ExtractDigest = [u8; 32];
 
-#[derive(Debug, Clone)]
+/// Monomorphic verifier randomness used by the extraction-oriented BaseFold / FRI opening path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractSamplingTrace<F: ExtractField> {
+	pub challenges: Vec<ExtractField>,
+	pub query_indices: Vec<usize>,
+}
+
+/// Monomorphic semantic opening object produced by the extraction-oriented BaseFold / FRI path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractOpenedLinearRelation<F: ExtractField> {
+	pub final_fri_value: F,
+	pub final_sumcheck_value: F,
+	pub query_point: Vec<ExtractField>,
+}
+
+/// Monomorphic opening object paired with the verifier randomness used to obtain it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractOpenedLinearRelationWithSampling<F: ExtractField> {
+	pub opened: ExtractOpenedLinearRelation<F>,
+	pub sampling: ExtractSamplingTrace<F>,
+}
+
+/// Monomorphic BaseFold / FRI reduced opening output exported to Hax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractReducedOutput<F: ExtractField> {
+	pub final_fri_value: F,
+	pub final_sumcheck_value: F,
+	pub sampling: ExtractSamplingTrace<F>,
+}
+
+/// Monomorphic authenticated BaseFold / FRI opening after transcript / Merkle checks but before
+/// the pure IOP semantic finalization step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractAuthenticatedLinearRelationOpening<F: ExtractField> {
+	pub final_sumcheck_value: F,
+	pub sampling: ExtractSamplingTrace<F>,
+	pub query_phase: AuthenticatedFRIQueryPhase<F, ExtractDigest>,
+	pub query_challenge_offset: usize,
+}
+
+/// Monomorphic BaseFold / FRI statement exported to Hax.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractBasefoldStatement<F: ExtractField> {
+	pub params: ExtractFriParams,
+	pub codeword_commitment: ExtractDigest,
+	pub evaluation_claim: F,
+}
+
+/// Monomorphic prover-message view for BaseFold / FRI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractBasefoldProofView<F: ExtractField> {
+	pub round_coeffs: Vec<[F; 2]>,
+	pub commitments: Vec<ExtractDigest>,
+	pub decommitment_scalars: Vec<Vec<ExtractField>>,
+	pub decommitments: Vec<Vec<ExtractDigest>>,
+	pub merkle_vectors: Vec<ExtractMerkleVector>,
+	pub merkle_openings: Vec<ExtractMerkleOpening>,
+	pub merkle_layers: Vec<ExtractMerkleLayer>,
+}
+
+/// Monomorphic verifier-randomness view for BaseFold / FRI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractBasefoldSamplingView<F: ExtractField> {
+	pub challenges: Vec<ExtractField>,
+	pub query_indices: Vec<usize>,
+}
+
+/// Monomorphic public-coin interaction view for BaseFold / FRI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractBasefoldTranscriptView<F: ExtractField> {
+	pub proof: ExtractBasefoldProofView<F>,
+	pub sampling: ExtractBasefoldSamplingView<F>,
+}
+
+/// Thin protocol-boundary marker for the extraction-oriented BaseFold / FRI verifier.
+pub struct ExtractBasefoldProtocol<F: ExtractField>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractFriParams {
 	pub log_msg_len: usize,
 	pub log_batch_size: usize,
@@ -36,6 +131,7 @@ impl ExtractFriParams {
 pub enum ExtractError {
 	MissingObject,
 	IncorrectProofShape,
+	UnconsumedTranscript,
 	MerkleVectorMismatch,
 	MerkleOpeningMismatch,
 	MerkleLayerMismatch,
@@ -43,14 +139,14 @@ pub enum ExtractError {
 	IncorrectDegree,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractMerkleVector {
 	pub root: ExtractDigest,
 	pub data: Vec<ExtractField>,
 	pub batch_size: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractMerkleOpening {
 	pub index: usize,
 	pub values: Vec<ExtractField>,
@@ -59,7 +155,7 @@ pub struct ExtractMerkleOpening {
 	pub layer_digests: Vec<ExtractDigest>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractMerkleLayer {
 	pub root: ExtractDigest,
 	pub layer_depth: usize,
@@ -68,7 +164,7 @@ pub struct ExtractMerkleLayer {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExtractProofOracle {
-	pub round_coeffs: Vec<[ExtractField; 2]>,
+	pub round_coeffs: Vec<[F; 2]>,
 	pub commitments: Vec<ExtractDigest>,
 	pub decommitment_scalars: Vec<Vec<ExtractField>>,
 	pub decommitments: Vec<Vec<ExtractDigest>>,
@@ -90,7 +186,7 @@ pub struct ExtractProofOracle {
 }
 
 impl ExtractProofOracle {
-	pub fn read_round_coeffs(&mut self) -> Result<[ExtractField; 2], ExtractError> {
+	pub fn read_round_coeffs(&mut self) -> Result<[F; 2], ExtractError> {
 		if let Some(value) = self.round_coeffs.get(self.round_coeffs_pos) {
 			self.round_coeffs_pos += 1;
 			Ok(*value)
@@ -139,7 +235,7 @@ impl ExtractProofOracle {
 		}
 	}
 
-	pub fn sample_challenge(&mut self) -> Result<ExtractField, ExtractError> {
+	pub fn sample_challenge(&mut self) -> Result<F, ExtractError> {
 		if let Some(value) = self.challenges.get(self.challenges_pos) {
 			self.challenges_pos += 1;
 			Ok(*value)
@@ -157,65 +253,61 @@ impl ExtractProofOracle {
 		}
 	}
 
-	pub fn verify_merkle_vector(
+	pub fn read_merkle_vector(
 		&mut self,
-		root: ExtractDigest,
-		data: &[ExtractField],
-		batch_size: usize,
-	) -> Result<(), ExtractError> {
-		if let Some(expected) = self.merkle_vectors.get(self.merkle_vectors_pos) {
+		value_len: usize,
+	) -> Result<ExtractMerkleVector, ExtractError> {
+		let data = self.read_decommitment_scalars(value_len)?;
+		if let Some(expected_ref) = self.merkle_vectors.get(self.merkle_vectors_pos) {
+			let expected = expected_ref.clone();
 			self.merkle_vectors_pos += 1;
-			if expected.root == root && expected.data == data && expected.batch_size == batch_size {
-				Ok(())
-			} else {
-				Err(ExtractError::MerkleVectorMismatch)
+			if expected.data.len() != value_len {
+				return Err(ExtractError::IncorrectProofShape);
 			}
+			if expected.data != data {
+				return Err(ExtractError::MerkleVectorMismatch);
+			}
+			Ok(expected)
 		} else {
 			Err(ExtractError::MissingObject)
 		}
 	}
 
-	pub fn verify_merkle_opening(
+	pub fn read_merkle_opening(
 		&mut self,
-		index: usize,
-		values: &[ExtractField],
-		layer_depth: usize,
-		tree_depth: usize,
-		layer_digests: &[ExtractDigest],
-	) -> Result<(), ExtractError> {
-		if let Some(expected) = self.merkle_openings.get(self.merkle_openings_pos) {
+		value_len: usize,
+	) -> Result<ExtractMerkleOpening, ExtractError> {
+		let values = self.read_decommitment_scalars(value_len)?;
+		if let Some(expected_ref) = self.merkle_openings.get(self.merkle_openings_pos) {
+			let expected = expected_ref.clone();
 			self.merkle_openings_pos += 1;
-			if expected.index == index
-				&& expected.values == values
-				&& expected.layer_depth == layer_depth
-				&& expected.tree_depth == tree_depth
-				&& expected.layer_digests == layer_digests
-			{
-				Ok(())
-			} else {
-				Err(ExtractError::MerkleOpeningMismatch)
+			if expected.values.len() != value_len {
+				return Err(ExtractError::IncorrectProofShape);
 			}
+			if expected.values != values {
+				return Err(ExtractError::MerkleOpeningMismatch);
+			}
+			Ok(expected)
 		} else {
 			Err(ExtractError::MissingObject)
 		}
 	}
 
-	pub fn verify_merkle_layer(
+	pub fn read_merkle_layer(
 		&mut self,
-		root: ExtractDigest,
-		layer_depth: usize,
-		layer_digests: &[ExtractDigest],
-	) -> Result<(), ExtractError> {
-		if let Some(expected) = self.merkle_layers.get(self.merkle_layers_pos) {
+		layer_size: usize,
+	) -> Result<ExtractMerkleLayer, ExtractError> {
+		let layer_digests = self.read_commitment_vec(layer_size)?;
+		if let Some(expected_ref) = self.merkle_layers.get(self.merkle_layers_pos) {
+			let expected = expected_ref.clone();
 			self.merkle_layers_pos += 1;
-			if expected.root == root
-				&& expected.layer_depth == layer_depth
-				&& expected.layer_digests == layer_digests
-			{
-				Ok(())
-			} else {
-				Err(ExtractError::MerkleLayerMismatch)
+			if expected.layer_digests.len() != layer_size {
+				return Err(ExtractError::IncorrectProofShape);
 			}
+			if expected.layer_digests != layer_digests {
+				return Err(ExtractError::MerkleLayerMismatch);
+			}
+			Ok(expected)
 		} else {
 			Err(ExtractError::MissingObject)
 		}
@@ -234,12 +326,173 @@ impl ExtractProofOracle {
 	}
 }
 
-pub fn verify_scripted_128b_ghash_extract(
+impl From<&ExtractBasefoldTranscriptView<F>> for ExtractProofOracle {
+	fn from(value: &ExtractBasefoldTranscriptView<F>) -> Self {
+		Self {
+			round_coeffs: value.proof.round_coeffs.clone(),
+			commitments: value.proof.commitments.clone(),
+			decommitment_scalars: value.proof.decommitment_scalars.clone(),
+			decommitments: value.proof.decommitments.clone(),
+			challenges: value.sampling.challenges.clone(),
+			query_indices: value.sampling.query_indices.clone(),
+			merkle_vectors: value.proof.merkle_vectors.clone(),
+			merkle_openings: value.proof.merkle_openings.clone(),
+			merkle_layers: value.proof.merkle_layers.clone(),
+			round_coeffs_pos: 0,
+			commitments_pos: 0,
+			decommitment_scalars_pos: 0,
+			decommitments_pos: 0,
+			challenges_pos: 0,
+			query_indices_pos: 0,
+			merkle_vectors_pos: 0,
+			merkle_openings_pos: 0,
+			merkle_layers_pos: 0,
+		}
+	}
+}
+
+impl<F: ExtractField> ExtractReducedOutput<F> {
+	pub fn sampling_trace(&self) -> ExtractSamplingTrace<F> {
+		self.sampling.clone()
+	}
+
+	pub fn opened_linear_relation(&self) -> ExtractOpenedLinearRelation<F> {
+		ExtractOpenedLinearRelation<F> {
+			final_fri_value: self.final_fri_value,
+			final_sumcheck_value: self.final_sumcheck_value,
+			query_point: crate::basefold::query_point_from_challenges(&self.sampling.challenges),
+		}
+	}
+
+	pub fn opened_linear_relation_with_sampling(&self) -> ExtractOpenedLinearRelationWithSampling<F> {
+		ExtractOpenedLinearRelationWithSampling<F> {
+			opened: self.opened_linear_relation(),
+			sampling: self.sampling_trace(),
+		}
+	}
+
+	pub fn into_opened_linear_relation_with_sampling(self) -> ExtractOpenedLinearRelationWithSampling<F> {
+		let query_point = crate::basefold::query_point_from_challenges(&self.sampling.challenges);
+		ExtractOpenedLinearRelationWithSampling<F> {
+			opened: ExtractOpenedLinearRelation<F> {
+				final_fri_value: self.final_fri_value,
+				final_sumcheck_value: self.final_sumcheck_value,
+				query_point,
+			},
+			sampling: self.sampling,
+		}
+	}
+}
+
+impl From<ReducedOutput<ExtractField>> for ExtractReducedOutput<F> {
+	fn from(value: ReducedOutput<ExtractField>) -> Self {
+		Self {
+			final_fri_value: value.final_fri_value,
+			final_sumcheck_value: value.final_sumcheck_value,
+			sampling: ExtractSamplingTrace<F> {
+				challenges: value.challenges,
+				query_indices: value.query_indices,
+			},
+		}
+	}
+}
+
+impl<F: ExtractField> ExtractBasefoldStatement<F> {
+	pub fn verify_transcript(
+		&self,
+		transcript: &ExtractBasefoldTranscriptView<F>,
+	) -> Result<ExtractReducedOutput<F>, ExtractError> {
+		ExtractBasefoldProtocol<F>::verify_statement_transcript(self, transcript)
+	}
+
+	pub fn verify_authenticated_transcript(
+		&self,
+		transcript: &ExtractBasefoldTranscriptView<F>,
+	) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
+		ExtractBasefoldProtocol<F>::verify_authenticated_statement_transcript(self, transcript)
+	}
+
+	pub fn verify_authenticated(
+		&self,
+		authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
+	) -> Result<ExtractReducedOutput<F>, ExtractError> {
+		ExtractBasefoldProtocol<F>::verify_authenticated(self, authenticated)
+	}
+
+	pub fn finalize_authenticated(
+		&self,
+		authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
+	) -> Result<ExtractOpenedLinearRelationWithSampling<F>, ExtractError> {
+		finalize_authenticated_extract(&self.params, authenticated)
+	}
+}
+
+impl AuthenticatedStatementTranscriptProtocol for ExtractBasefoldProtocol<F> {
+	type Statement = ExtractBasefoldStatement<F>;
+	type TranscriptView = ExtractBasefoldTranscriptView<F>;
+	type Authenticated = ExtractAuthenticatedLinearRelationOpening<F>;
+	type Output = ExtractReducedOutput<F>;
+	type Error = ExtractError;
+
+	fn verify_authenticated_statement_transcript(
+		statement: &Self::Statement,
+		transcript: &Self::TranscriptView,
+	) -> Result<Self::Authenticated, Self::Error> {
+		verify_authenticated_statement_transcript_extract(statement, transcript)
+	}
+
+	fn verify_authenticated(
+		statement: &Self::Statement,
+		authenticated: Self::Authenticated,
+	) -> Result<Self::Output, Self::Error> {
+		verify_authenticated_extract(&statement.params, authenticated)
+	}
+}
+
+pub fn verify_statement_transcript_extract(
+	statement: &ExtractBasefoldStatement<F>,
+	transcript: &ExtractBasefoldTranscriptView<F>,
+) -> Result<ExtractReducedOutput<F>, ExtractError> {
+	let authenticated =
+		verify_authenticated_statement_transcript_extract(statement, transcript)?;
+	verify_authenticated_extract(&statement.params, authenticated)
+}
+
+pub fn verify_authenticated_statement_transcript_extract(
+	statement: &ExtractBasefoldStatement<F>,
+	transcript: &ExtractBasefoldTranscriptView<F>,
+) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
+	let mut oracle = ExtractProofOracle::from(transcript);
+	let output = open_authenticated_extract(
+		&statement.params,
+		statement.codeword_commitment,
+		statement.evaluation_claim,
+		&mut oracle,
+	)?;
+	if oracle.is_consumed() {
+		Ok(output)
+	} else {
+		Err(ExtractError::UnconsumedTranscript)
+	}
+}
+
+pub fn verify_scripted_extract(
 	params: &ExtractFriParams,
 	codeword_commitment: ExtractDigest,
-	evaluation_claim: ExtractField,
+	evaluation_claim: F,
 	oracle: &mut ExtractProofOracle,
-) -> Result<ReducedOutput<ExtractField>, ExtractError> {
+) -> Result<ExtractReducedOutput<F>, ExtractError> {
+	let authenticated =
+		open_authenticated_extract(params, codeword_commitment, evaluation_claim, oracle)?;
+	verify_authenticated_extract(params, authenticated)
+}
+
+pub fn open_authenticated_extract(
+	params: &ExtractFriParams,
+	codeword_commitment: ExtractDigest,
+	evaluation_claim: F,
+	oracle: &mut ExtractProofOracle,
+) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
 	let n_vars = params.log_msg_len;
 	let commitment_rounds =
 		calculate_fri_commit_rounds(params.log_batch_size, &params.fold_arities, n_vars + 1);
@@ -261,41 +514,69 @@ pub fn verify_scripted_128b_ghash_extract(
 		round_commitments.push(oracle.read_commitment()?);
 	}
 
-	let final_fri_value =
-		verify_fri_scripted(params, codeword_commitment, &round_commitments, &challenges, oracle)?;
+	let query_phase = open_fri_scripted(params, codeword_commitment, &round_commitments, oracle)?;
 
-	Ok(ReducedOutput {
-		final_fri_value,
+	Ok(ExtractAuthenticatedLinearRelationOpening<F> {
 		final_sumcheck_value: sum,
-		challenges,
+		sampling: ExtractSamplingTrace<F> {
+			challenges,
+			query_indices: query_phase.query_indices.clone(),
+		},
+		query_phase,
+		query_challenge_offset: 0,
 	})
 }
 
-fn verify_fri_scripted(
+pub fn verify_authenticated_extract(
+	params: &ExtractFriParams,
+	authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
+) -> Result<ExtractReducedOutput<F>, ExtractError> {
+	let opened_fri = verify_opened_fri_scripted(
+		params,
+		&authenticated.sampling.challenges,
+		authenticated.query_phase,
+	)?;
+	Ok(ExtractReducedOutput<F> {
+		final_fri_value: opened_fri.final_value,
+		final_sumcheck_value: authenticated.final_sumcheck_value,
+		sampling: authenticated.sampling,
+	})
+}
+
+pub fn finalize_authenticated_extract(
+	params: &ExtractFriParams,
+	authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
+) -> Result<ExtractOpenedLinearRelationWithSampling<F>, ExtractError> {
+	let reduced = verify_authenticated_extract(params, authenticated.clone())?;
+	let query_point = crate::basefold::query_point_from_challenges(
+		&authenticated.sampling.challenges[authenticated.query_challenge_offset..],
+	);
+	Ok(ExtractOpenedLinearRelationWithSampling<F> {
+		opened: ExtractOpenedLinearRelation<F> {
+			final_fri_value: reduced.final_fri_value,
+			final_sumcheck_value: authenticated.final_sumcheck_value,
+			query_point,
+		},
+		sampling: authenticated.sampling,
+	})
+}
+
+fn open_fri_scripted(
 	params: &ExtractFriParams,
 	codeword_commitment: ExtractDigest,
 	round_commitments: &[ExtractDigest],
-	challenges: &[ExtractField],
 	oracle: &mut ExtractProofOracle,
-) -> Result<ExtractField, ExtractError> {
-	let interleave_challenges = &challenges[..params.log_batch_size];
-	let fold_challenges = &challenges[params.log_batch_size..];
+) -> Result<AuthenticatedFRIQueryPhase<F, ExtractDigest>, ExtractError> {
 	let terminate_codeword_len = 1 << (params.n_final_challenges + params.log_inv_rate);
-	let terminate_codeword = oracle.read_decommitment_scalars(terminate_codeword_len)?;
-	let final_value = verify_last_oracle_scripted(
-		params,
-		round_commitments,
-		fold_challenges,
-		&terminate_codeword,
-		oracle,
-	)?;
+	let terminal_vector = oracle.read_merkle_vector(terminate_codeword_len)?;
+	open_last_oracle_scripted(params, round_commitments, &terminal_vector)?;
 
 	let mut layers = Vec::with_capacity(params.layer_depths.len());
 	let mut layer_error = None;
 	let mut i = 0;
 	while i < params.layer_depths.len() {
 		let layer_depth = params.layer_depths[i];
-		match oracle.read_commitment_vec(1 << layer_depth) {
+		match oracle.read_merkle_layer(1 << layer_depth) {
 			Ok(layer) => layers.push(layer),
 			Err(err) => layer_error = Some(err),
 		}
@@ -314,12 +595,11 @@ fn verify_fri_scripted(
 			} else {
 				round_commitments[verify_idx - 1]
 			};
-			if let Err(err) = oracle.verify_merkle_layer(
-				commitment,
-				params.layer_depths[verify_idx],
-				&layers[verify_idx],
-			) {
-				verify_error = Some(err);
+			let layer = &layers[verify_idx];
+			if layer.root != commitment || layer.layer_depth != params.layer_depths[verify_idx] {
+				verify_error = Some(ExtractError::MerkleLayerMismatch);
+			} else if layer.layer_digests.len() != (1 << params.layer_depths[verify_idx]) {
+				verify_error = Some(ExtractError::IncorrectProofShape);
 			}
 		}
 		verify_idx += 1;
@@ -329,22 +609,21 @@ fn verify_fri_scripted(
 	}
 
 	let mut query_error = None;
+	let mut opened_queries = Vec::with_capacity(params.n_test_queries);
+	let mut query_indices = Vec::with_capacity(params.n_test_queries);
 	let mut query_idx = 0;
 	while query_idx < params.n_test_queries {
 		if query_error.is_none() {
 			match oracle.sample_query_index() {
 				Ok(index) => {
-					let result = verify_query_scripted(
-						params,
-						interleave_challenges,
-						fold_challenges,
-						index,
-						&terminate_codeword,
-						&layers,
-						oracle,
-					);
-					if let Err(err) = result {
-						query_error = Some(err);
+					match read_opened_query_scripted(params, index, &layers, oracle) {
+						Ok(opened_query) => {
+							query_indices.push(index);
+							opened_queries.push(opened_query);
+						}
+						Err(err) => {
+							query_error = Some(err);
+						}
 					}
 				}
 				Err(err) => {
@@ -354,31 +633,87 @@ fn verify_fri_scripted(
 		}
 		query_idx += 1;
 	}
+	if let Some(err) = query_error {
+		return Err(err);
+	}
+
+	let mut extracted_layers = Vec::with_capacity(layers.len());
+	let mut layer_idx = 0;
+	while layer_idx < layers.len() {
+		extracted_layers.push(layers[layer_idx].layer_digests.clone());
+		layer_idx += 1;
+	}
+
+	Ok(AuthenticatedFRIQueryPhase {
+		query_indices,
+		terminate_codeword: terminal_vector.data,
+		layers: extracted_layers,
+		opened_queries,
+	})
+}
+
+fn verify_opened_fri_scripted(
+	params: &ExtractFriParams,
+	challenges: &[F],
+	authenticated: AuthenticatedFRIQueryPhase<F, ExtractDigest>,
+) -> Result<OpenedFRIQueryPhase<F, ExtractDigest>, ExtractError> {
+	let interleave_challenges = &challenges[..params.log_batch_size];
+	let fold_challenges = &challenges[params.log_batch_size..];
+	let final_value =
+		verify_last_oracle_values_scripted(params, fold_challenges, &authenticated.terminate_codeword)?;
+
+	let mut query_error = None;
+	let mut i = 0;
+	while i < authenticated.opened_queries.len() {
+		if query_error.is_none() {
+			let result = verify_opened_query_scripted(
+				params,
+				interleave_challenges,
+				fold_challenges,
+				&authenticated.terminate_codeword,
+				authenticated.opened_queries[i].clone(),
+			);
+			if let Err(err) = result {
+				query_error = Some(err);
+			}
+		}
+		i += 1;
+	}
 
 	if let Some(err) = query_error {
 		Err(err)
 	} else {
-		Ok(final_value)
+		Ok(OpenedFRIQueryPhase {
+			final_value,
+			query_indices: authenticated.query_indices,
+			terminate_codeword: authenticated.terminate_codeword,
+			layers: authenticated.layers,
+		})
 	}
 }
 
-fn verify_last_oracle_scripted(
+fn open_last_oracle_scripted(
 	params: &ExtractFriParams,
 	round_commitments: &[ExtractDigest],
-	fold_challenges: &[ExtractField],
-	terminate_codeword: &[ExtractField],
-	oracle: &mut ExtractProofOracle,
-) -> Result<ExtractField, ExtractError> {
+	terminal_vector: &ExtractMerkleVector,
+) -> Result<(), ExtractError> {
 	if round_commitments.is_empty() {
 		return Err(ExtractError::IncorrectProofShape);
 	}
 	let terminal_commitment = round_commitments[round_commitments.len() - 1];
-	oracle.verify_merkle_vector(
-		terminal_commitment,
-		terminate_codeword,
-		1 << params.n_final_challenges,
-	)?;
+	if terminal_vector.root != terminal_commitment
+		|| terminal_vector.batch_size != (1 << params.n_final_challenges)
+	{
+		return Err(ExtractError::MerkleVectorMismatch);
+	}
+	Ok(())
+}
 
+fn verify_last_oracle_values_scripted(
+	params: &ExtractFriParams,
+	fold_challenges: &[F],
+	terminate_codeword: &[F],
+) -> Result<F, ExtractError> {
 	let n_prior_challenges = fold_challenges.len() - params.n_final_challenges;
 	let final_challenges = &fold_challenges[n_prior_challenges..];
 	let chunk_len = 1 << params.n_final_challenges;
@@ -421,19 +756,16 @@ fn verify_last_oracle_scripted(
 	}
 }
 
-fn verify_query_scripted(
+fn read_opened_query_scripted(
 	params: &ExtractFriParams,
-	interleave_challenges: &[ExtractField],
-	fold_challenges: &[ExtractField],
 	mut index: usize,
-	terminate_codeword: &[ExtractField],
-	layers: &[Vec<ExtractDigest>],
+	layers: &[ExtractMerkleLayer],
 	oracle: &mut ExtractProofOracle,
-) -> Result<(), ExtractError> {
-	let interleave_tensor = eq_ind_partial_eval_scalars(interleave_challenges);
+) -> Result<OpenedFRIQuery<ExtractField>, ExtractError> {
+	let initial_index = index;
 	let first_layer_depth = params.layer_depths[0];
-	let first_layer = &layers[0];
-	let values = verify_coset_opening_scripted(
+	let first_layer = &layers[0].layer_digests;
+	let first_values = verify_coset_opening_scripted(
 		oracle,
 		index,
 		params.log_batch_size,
@@ -441,66 +773,90 @@ fn verify_query_scripted(
 		params.index_bits,
 		first_layer,
 	)?;
-	let mut next_value = fold_interleaved_chunk_scalar(&values, &interleave_tensor);
 
-	let mut fold_round = 0;
 	let mut log_n_cosets = params.index_bits;
-	let mut fold_error = None;
-
+	let mut fold_values = Vec::with_capacity(params.fold_arities.len());
 	for i in 0..params.fold_arities.len() {
-		if fold_error.is_none() {
-			let arity = params.fold_arities[i];
-			let layer = &layers[i + 1];
-			let optimal_layer_depth = params.layer_depths[i + 1];
-			let coset_index = index >> arity;
-			log_n_cosets -= arity;
+		let arity = params.fold_arities[i];
+		let layer = &layers[i + 1].layer_digests;
+		let optimal_layer_depth = params.layer_depths[i + 1];
+		let coset_index = index >> arity;
+		log_n_cosets -= arity;
 
-			let values_result = verify_coset_opening_scripted(
-				oracle,
-				coset_index,
-				arity,
-				optimal_layer_depth,
-				log_n_cosets,
-				layer,
-			);
-			match values_result {
-				Ok(values2) => {
-					if next_value != values2[index % (1 << arity)] {
-						fold_error = Some(ExtractError::IncorrectFold {
-							query_round: i,
-							index,
-						});
-					} else {
-						next_value = fold_chunk_with_domain(
-							&params.twiddle_evals,
-							params.index_bits - fold_round,
-							coset_index,
-							values2,
-							&fold_challenges[fold_round..fold_round + arity],
-						);
-						index = coset_index;
-						fold_round += arity;
-					}
-				}
-				Err(err) => {
-					fold_error = Some(err);
-				}
-			}
-		}
+		let values = verify_coset_opening_scripted(
+			oracle,
+			coset_index,
+			arity,
+			optimal_layer_depth,
+			log_n_cosets,
+			layer,
+		)?;
+		fold_values.push(values);
+		index = coset_index;
 	}
 
+	Ok(OpenedFRIQuery {
+		initial_index,
+		first_values,
+		fold_values,
+	})
+}
+
+fn verify_opened_query_scripted(
+	params: &ExtractFriParams,
+	interleave_challenges: &[F],
+	fold_challenges: &[F],
+	terminate_codeword: &[F],
+	query: OpenedFRIQuery<ExtractField>,
+) -> Result<(), ExtractError> {
+	let OpenedFRIQuery {
+		initial_index,
+		first_values,
+		fold_values,
+	} = query;
+	let interleave_tensor = eq_ind_partial_eval_scalars(interleave_challenges);
+	let mut index = initial_index;
+	let mut next_value = fold_interleaved_chunk_scalar(&first_values, &interleave_tensor);
+
+	let mut fold_round = 0;
+	let mut i = 0;
+	let mut fold_error = None;
+	while i < params.fold_arities.len() {
+		if fold_error.is_none() {
+			let arity = params.fold_arities[i];
+			let values2 = fold_values[i].clone();
+			let coset_index = index >> arity;
+			if next_value != values2[index % (1 << arity)] {
+				fold_error = Some(ExtractError::IncorrectFold {
+					query_round: i,
+					index,
+				});
+			} else {
+				next_value = fold_chunk_with_domain(
+					&params.twiddle_evals,
+					params.index_bits - fold_round,
+					coset_index,
+					values2,
+					&fold_challenges[fold_round..fold_round + arity],
+				);
+				index = coset_index;
+				fold_round += arity;
+			}
+		}
+		i += 1;
+	}
 	if let Some(err) = fold_error {
 		return Err(err);
 	}
 
 	if next_value != terminate_codeword[index] {
-		Err(ExtractError::IncorrectFold {
+		return Err(ExtractError::IncorrectFold {
 			query_round: params.n_oracles() - 1,
 			index,
-		})
-	} else {
-		Ok(())
+		});
 	}
+
+	Ok(())
 }
 
 fn verify_coset_opening_scripted(
@@ -511,9 +867,15 @@ fn verify_coset_opening_scripted(
 	tree_depth: usize,
 	layer_digests: &[ExtractDigest],
 ) -> Result<Vec<ExtractField>, ExtractError> {
-	let values = oracle.read_decommitment_scalars(1 << log_coset_size)?;
-	oracle.verify_merkle_opening(coset_index, &values, layer_depth, tree_depth, layer_digests)?;
-	Ok(values)
+	let opening = oracle.read_merkle_opening(1 << log_coset_size)?;
+	if opening.index != coset_index
+		|| opening.layer_depth != layer_depth
+		|| opening.tree_depth != tree_depth
+		|| opening.layer_digests != layer_digests
+	{
+		return Err(ExtractError::MerkleOpeningMismatch);
+	}
+	Ok(opening.values)
 }
 
 fn calculate_fri_commit_rounds(
@@ -552,23 +914,23 @@ fn calculate_fri_commit_rounds(
 	result
 }
 
-fn recover_round_coeffs(sum: ExtractField, coeffs: [ExtractField; 2]) -> [ExtractField; 3] {
+fn recover_round_coeffs(sum: F, coeffs: [F; 2]) -> [F; 3] {
 	let coeff_0 = coeffs[0];
 	let coeff_1 = coeffs[1];
 	let coeff_2 = sum - coeff_0 - coeff_0 - coeff_1;
 	[coeff_0, coeff_1, coeff_2]
 }
 
-fn evaluate_round_coeffs(coeffs: [ExtractField; 3], x: ExtractField) -> ExtractField {
+fn evaluate_round_coeffs(coeffs: [F; 3], x: F) -> F {
 	let coeff_0 = coeffs[0];
 	let coeff_1 = coeffs[1];
 	let coeff_2 = coeffs[2];
 	coeff_0 + x * (coeff_1 + x * coeff_2)
 }
 
-fn eq_ind_partial_eval_scalars(point: &[ExtractField]) -> Vec<ExtractField> {
+fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 	let mut result = Vec::with_capacity(1);
-	result.push(ExtractField::new(1));
+	result.push(F::ONE);
 	let mut i = 0;
 	while i < point.len() {
 		let r_i = point[i];
@@ -599,11 +961,11 @@ fn fold_pair_with_domain(
 	twiddle_evals: &[Vec<ExtractField>],
 	round: usize,
 	index: usize,
-	values: (ExtractField, ExtractField),
-	challenge: ExtractField,
-) -> ExtractField {
+	values: (F, F),
+	challenge: F,
+) -> F {
 	let basis_row = &twiddle_evals[twiddle_evals.len() - round][1..];
-	let mut twiddle = ExtractField::new(0);
+	let mut twiddle = F::ZERO;
 	let mut mask = index;
 	let mut i = 0;
 	while mask != 0 {
@@ -625,8 +987,8 @@ fn fold_chunk_with_domain(
 	mut log_len: usize,
 	chunk_index: usize,
 	mut values: Vec<ExtractField>,
-	challenges: &[ExtractField],
-) -> ExtractField {
+	challenges: &[F],
+) -> F {
 	let mut log_size = challenges.len();
 	let mut challenge_idx = 0;
 	while challenge_idx < challenges.len() {
@@ -654,8 +1016,8 @@ fn fold_chunk_with_domain(
 	values[0]
 }
 
-fn fold_interleaved_chunk_scalar(values: &[ExtractField], tensor: &[ExtractField]) -> ExtractField {
-	let mut acc = ExtractField::new(0);
+fn fold_interleaved_chunk_scalar(values: &[F], tensor: &[F]) -> F {
+	let mut acc = F::ZERO;
 	for i in 0..values.len() {
 		acc = acc + values[i] * tensor[i];
 	}

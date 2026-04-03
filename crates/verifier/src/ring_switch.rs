@@ -18,10 +18,33 @@ pub enum Error {
 	Channel(#[from] binius_ip::channel::Error),
 }
 
+/// Typed transparent relation produced by ring-switch verification.
+///
+/// This packages the query-independent data needed for the final transparent-polynomial check in
+/// the PCS opening phase.
+#[derive(Debug, Clone)]
+pub struct RingSwitchEqRelation<F: BinaryField + PackedField<Scalar = F>> {
+	/// The vertical evaluation point used by the ring-switching equality indicator.
+	pub eval_point_high: Vec<F>,
+	/// The expanded row-batching challenges.
+	pub eq_r_double_prime: Vec<F>,
+}
+
+impl<F> RingSwitchEqRelation<F>
+where
+	F: BinaryField + PackedField<Scalar = F>,
+{
+	/// Evaluate the ring-switching equality indicator at the given query point.
+	pub fn eval(&self, query: &[F]) -> F {
+		eval_rs_eq(&self.eval_point_high, query, &self.eq_r_double_prime)
+	}
+}
+
 /// Output of ring-switching verification.
+#[derive(Debug, Clone)]
 pub struct RingSwitchVerifyOutput<F: BinaryField + PackedField<Scalar = F>> {
-	/// The row-batching challenges (expanded via eq_ind).
-	pub eq_r_double_prime: FieldBuffer<F>,
+	/// The typed transparent relation used in the final PCS consistency check.
+	pub relation: RingSwitchEqRelation<F>,
 	/// The verified sumcheck claim for BaseFold.
 	pub sumcheck_claim: F,
 }
@@ -34,7 +57,7 @@ pub struct RingSwitchVerifyOutput<F: BinaryField + PackedField<Scalar = F>> {
 /// 3. Samples row-batching challenges
 /// 4. Computes the sumcheck claim for BaseFold
 ///
-/// Returns the eq_r_double_prime (for final check) and sumcheck claim.
+/// Returns the typed transparent relation (for the final check) and sumcheck claim.
 ///
 /// ## Arguments
 ///
@@ -56,7 +79,7 @@ where
 	C: IPVerifierChannel<F, Elem = F>,
 {
 	let log_packing = <F as ExtensionField<B1>>::LOG_DEGREE;
-	let (eval_point_low, _eval_point_high) = eval_point.split_at(log_packing);
+	let (eval_point_low, eval_point_high) = eval_point.split_at(log_packing);
 
 	// Receive s_hat_v
 	let s_hat_v = channel.recv_many(1 << log_packing)?;
@@ -71,13 +94,16 @@ where
 
 	// Sample r_double_prime
 	let r_double_prime = channel.sample_many(log_packing);
-	let eq_r_double_prime = eq_ind_partial_eval::<F>(&r_double_prime);
+	let eq_r_double_prime = eq_ind_partial_eval::<F>(&r_double_prime).as_ref().to_vec();
 
 	// Compute sumcheck claim
 	let sumcheck_claim = evaluate::<F, F, _>(&s_hat_u, &r_double_prime);
 
 	Ok(RingSwitchVerifyOutput {
-		eq_r_double_prime,
+		relation: RingSwitchEqRelation {
+			eval_point_high: eval_point_high.to_vec(),
+			eq_r_double_prime,
+		},
 		sumcheck_claim,
 	})
 }

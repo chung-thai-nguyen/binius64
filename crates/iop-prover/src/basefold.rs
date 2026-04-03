@@ -313,6 +313,7 @@ mod test {
 			final_fri_value,
 			final_sumcheck_value,
 			challenges,
+			..
 		} = verifier_basefold::verify(
 			&fri_params,
 			merkle_prover.scheme(),
@@ -422,6 +423,7 @@ mod test {
 			final_fri_value,
 			final_sumcheck_value,
 			challenges,
+			..
 		} = verifier_basefold::verify_zk(
 			&fri_params,
 			merkle_prover.scheme(),

@@ -260,7 +260,9 @@ mod tests {
 	use binius_hash::{ParallelCompressionAdaptor, StdCompression, StdDigest};
 	use binius_iop::{
 		basefold_compiler::BaseFoldZKVerifierCompiler,
-		channel::{IOPVerifierChannel, OracleLinearRelation, OracleSpec},
+		channel::{
+			IOPVerifierChannel, OracleCommitmentVerifierChannel, OracleLinearRelation, OracleSpec,
+		},
 		fri::MinProofSizeStrategy,
 	};
 	use binius_math::{

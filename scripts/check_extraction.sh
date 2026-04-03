@@ -81,6 +81,11 @@ log() {
   printf '\n==> %s\n' "$*"
 }
 
+run_extract_surface_checks() {
+  log "Checking extract authoring surface"
+  python3 "$ROOT/scripts/extraction-check/check_extract_surface.py"
+}
+
 retry() {
   local attempts="$1"
   shift
@@ -214,6 +219,8 @@ build_aeneas_module_tree() {
 }
 
 run_hax() {
+  run_extract_surface_checks
+
   log "Generating Hax BaseFold extract"
   (
     cd "$BINIUS_REPO"
@@ -222,7 +229,7 @@ run_hax() {
     HAX_ENGINE_BINARY="$HAX_ENGINE_BINARY" \
       cargo hax -C -p binius-iop ';' \
       into \
-      -i '-** +binius_iop::basefold_extract::verify_scripted_128b_ghash_extract' \
+      -i '-** +binius_iop::basefold_extract::verify_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::verify_authenticated_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::finalize_authenticated_128b_ghash_extract +binius_iop::basefold_extract::ExtractBasefoldStatement +binius_iop::basefold_extract::ExtractBasefoldProofView +binius_iop::basefold_extract::ExtractBasefoldSamplingView +binius_iop::basefold_extract::ExtractBasefoldTranscriptView +binius_iop::basefold_extract::ExtractSamplingTrace +binius_iop::basefold_extract::ExtractOpenedLinearRelation +binius_iop::basefold_extract::ExtractOpenedLinearRelationWithSampling +binius_iop::basefold_extract::ExtractReducedOutput +binius_iop::basefold_extract::ExtractAuthenticatedLinearRelationOpening +binius_iop::basefold::ReducedOutput +binius_iop::basefold::SamplingTrace +binius_iop::basefold::OpenedLinearRelation +binius_iop::basefold::OpenedLinearRelationWithSampling +binius_iop::basefold::query_point_from_challenges +binius_iop::basefold::opened_linear_relation_from_challenges' \
       --output-dir "$EXTRACTION_DIR/hax-basefold-extract" \
       lean
   )
@@ -235,7 +242,7 @@ run_hax() {
     HAX_ENGINE_BINARY="$HAX_ENGINE_BINARY" \
       cargo hax -C -p binius-verifier ';' \
       into \
-      -i '-** +binius_verifier::pcs_extract::verify_scripted_128b_ghash_extract' \
+      -i '-** +binius_verifier::pcs_extract::verify_statement_transcript_128b_ghash_extract +binius_verifier::pcs_extract::verify_authenticated_statement_transcript_128b_ghash_extract +binius_verifier::pcs_extract::finalize_authenticated_128b_ghash_extract +binius_verifier::pcs_extract::ExtractPcsStatement +binius_verifier::pcs_extract::ExtractPcsTranscriptView +binius_verifier::pcs_extract::ExtractPcsOpeningOutput +binius_verifier::pcs_extract::ExtractAuthenticatedPcsOpening +binius_verifier::ring_switch_extract::ExtractRingSwitchStatement +binius_verifier::ring_switch_extract::ExtractRingSwitchProofView +binius_verifier::ring_switch_extract::ExtractRingSwitchSamplingView +binius_verifier::ring_switch_extract::ExtractRingSwitchTranscriptView' \
       --output-dir "$EXTRACTION_DIR/hax-pcs-extract" \
       lean
   )
@@ -244,13 +251,15 @@ run_hax() {
 }
 
 run_aeneas() {
+  run_extract_surface_checks
+
   log "Generating Aeneas PCS LLBC"
   (
     cd "$BINIUS_REPO"
     rm -f "$EXTRACTION_DIR/binius_verifier_pcs_extract.llbc"
     "$CHARON" cargo \
       --preset=aeneas \
-      --start-from crate::pcs_extract::verify_scripted_128b_ghash_extract \
+      --start-from crate::pcs_extract::verify_statement_transcript_128b_ghash_extract \
       --no-dedup-serialized-ast \
       --dest-file "$EXTRACTION_DIR/binius_verifier_pcs_extract.llbc" \
       -- \

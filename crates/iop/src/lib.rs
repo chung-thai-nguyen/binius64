@@ -34,4 +34,5 @@ pub mod channel;
 pub mod fri;
 pub mod merkle_tree;
 pub mod naive_channel;
+pub mod protocol_boundary;
 pub mod size_tracking_channel;

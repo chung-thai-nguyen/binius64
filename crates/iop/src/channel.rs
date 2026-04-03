@@ -13,6 +13,15 @@
 //!
 //! This abstraction allows protocol implementations to be generic over the underlying
 //! communication and commitment mechanisms.
+//!
+//! The traits below deliberately separate three concerns:
+//! - [`OracleCommitmentVerifierChannel`]: receiving committed-oracle handles
+//! - [`AuthenticatedOpeningVerifierChannel`]: authenticating openings under a concrete
+//!   commitment / Fiat-Shamir instantiation
+//! - [`IOPVerifierChannel`]: the legacy fused interface that directly verifies linear relations
+//!
+//! This split lets verifier code target the pure IOP semantics first and later plug in a concrete
+//! BCS / Fiat-Shamir backend as a black-box authenticated-opening layer.
 
 use binius_field::Field;
 use binius_ip::channel::IPVerifierChannel;
@@ -58,6 +67,38 @@ pub struct OracleLinearRelation<Oracle, Elem> {
 	pub claim: Elem,
 }
 
+/// Channel for verifiers that can receive committed oracle handles.
+///
+/// This is the minimal commitment-facing boundary shared by both the legacy fused IOP interface
+/// and the newer authenticated-opening layer.
+pub trait OracleCommitmentVerifierChannel<F: Field>: IPVerifierChannel<F> {
+	type Oracle: Clone;
+
+	/// Returns the specifications for the remaining oracles to be received.
+	fn remaining_oracle_specs(&self) -> &[OracleSpec];
+
+	/// Receives an oracle commitment from the prover.
+	///
+	/// # Preconditions
+	///
+	/// `remaining_oracle_specs()` must be non-empty.
+	fn recv_oracle(&mut self) -> Result<Self::Oracle, Error>;
+}
+
+/// Channel for verifiers that can authenticate oracle openings under a concrete commitment and
+/// challenge-generation backend, but leave the final pure IOP semantic checks to the caller.
+pub trait AuthenticatedOpeningVerifierChannel<F: Field>: OracleCommitmentVerifierChannel<F> {
+	type AuthenticatedOpening;
+
+	/// Run the concrete opening/authentication layer for one committed linear relation and return
+	/// the authenticated opening object before the final pure IOP semantic checks.
+	fn open_authenticated_linear_relation(
+		&mut self,
+		oracle: Self::Oracle,
+		claim: F,
+	) -> Result<Self::AuthenticatedOpening, Error>;
+}
+
 /// Channel for IOP verifiers that extends the IP verifier channel with oracle operations.
 ///
 /// In an IOP, the verifier can:
@@ -71,21 +112,7 @@ pub struct OracleLinearRelation<Oracle, Elem> {
 /// The caller must call `recv_oracle()` exactly `remaining_oracle_specs().len()` times before
 /// calling `verify_oracle_relations()`. The oracles must be received in order and match their
 /// specifications.
-pub trait IOPVerifierChannel<F: Field>: IPVerifierChannel<F> {
-	type Oracle: Clone;
-
-	/// Returns the specifications for the remaining oracles to be received.
-	///
-	/// This slice shrinks as oracles are received via `recv_oracle()`.
-	fn remaining_oracle_specs(&self) -> &[OracleSpec];
-
-	/// Receives an oracle commitment from the prover.
-	///
-	/// # Preconditions
-	///
-	/// `remaining_oracle_specs()` must be non-empty.
-	fn recv_oracle(&mut self) -> Result<Self::Oracle, Error>;
-
+pub trait IOPVerifierChannel<F: Field>: OracleCommitmentVerifierChannel<F> {
 	/// Verifies all oracle linear relations by running opening protocols.
 	///
 	/// For each oracle relation, this method:

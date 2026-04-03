@@ -15,7 +15,10 @@ use binius_utils::DeserializeBytes;
 
 use crate::{
 	basefold,
-	channel::{Error, IOPVerifierChannel, OracleLinearRelation, OracleSpec},
+	channel::{
+		AuthenticatedOpeningVerifierChannel, Error, IOPVerifierChannel,
+		OracleCommitmentVerifierChannel, OracleLinearRelation, OracleSpec,
+	},
 	fri::FRIParams,
 	merkle_tree::MerkleTreeScheme,
 };
@@ -94,6 +97,74 @@ where
 	pub fn transcript(&self) -> &VerifierTranscript<Challenger_> {
 		self.transcript
 	}
+
+	/// Run the BaseFold opening protocol for one committed oracle relation and return the typed
+	/// semantic opening object used by the final transparent-polynomial check.
+	pub fn open_linear_relation(
+		&mut self,
+		oracle: BaseFoldOracle,
+		claim: F,
+	) -> Result<basefold::OpenedLinearRelation<F>, Error> {
+		self.open_linear_relation_with_sampling(oracle, claim)
+			.map(|opened| opened.opened)
+	}
+
+	/// Run the BaseFold opening protocol for one committed oracle relation and return both the
+	/// semantic opening object and the verifier randomness used to obtain it.
+	pub fn open_linear_relation_with_sampling(
+		&mut self,
+		oracle: BaseFoldOracle,
+		claim: F,
+	) -> Result<basefold::OpenedLinearRelationWithSampling<F>, Error> {
+		let authenticated = self.open_authenticated_linear_relation(oracle, claim)?;
+		Ok(basefold::finalize_authenticated_opening(
+			&self.fri_params[oracle.index],
+			authenticated,
+		)?)
+	}
+
+	/// Run the BaseFold opening protocol for one committed oracle relation and return the
+	/// authenticated opening object before the pure IOP semantic finalization step.
+	pub fn open_authenticated_linear_relation(
+		&mut self,
+		oracle: BaseFoldOracle,
+		claim: F,
+	) -> Result<basefold::AuthenticatedLinearRelationOpening<F, MerkleScheme_::Digest>, Error> {
+		assert!(
+			self.remaining_oracle_specs().is_empty(),
+			"open_linear_relation called but {} oracle specs remaining",
+			self.remaining_oracle_specs().len()
+		);
+
+		let index = oracle.index;
+		assert!(
+			index < self.oracle_commitments.len(),
+			"oracle index {index} out of bounds, expected < {}",
+			self.oracle_commitments.len()
+		);
+
+		let fri_params = &self.fri_params[index];
+		let commitment = self.oracle_commitments[index].clone();
+		let basefold_output = basefold::open_authenticated(
+			fri_params,
+			self.merkle_scheme,
+			commitment,
+			claim,
+			self.transcript,
+		)?;
+
+		Ok(basefold_output)
+	}
+
+	fn verify_linear_relation(
+		&mut self,
+		relation: OracleLinearRelation<BaseFoldOracle, F>,
+	) -> Result<(), Error> {
+		let opened = self.open_linear_relation(relation.oracle, relation.claim)?;
+		let transparent_eval = (relation.transparent)(&opened.query_point);
+		self.assert_zero(opened.consistency_error(transparent_eval))?;
+		Ok(())
+	}
 }
 
 impl<F, MerkleScheme_, Challenger_> IPVerifierChannel<F>
@@ -149,7 +220,7 @@ where
 	}
 }
 
-impl<F, MerkleScheme_, Challenger_> IOPVerifierChannel<F>
+impl<F, MerkleScheme_, Challenger_> OracleCommitmentVerifierChannel<F>
 	for BaseFoldVerifierChannel<'_, F, MerkleScheme_, Challenger_>
 where
 	F: BinaryField,
@@ -182,51 +253,39 @@ where
 
 		Ok(BaseFoldOracle { index })
 	}
+}
 
+impl<F, MerkleScheme_, Challenger_> AuthenticatedOpeningVerifierChannel<F>
+	for BaseFoldVerifierChannel<'_, F, MerkleScheme_, Challenger_>
+where
+	F: BinaryField,
+	MerkleScheme_: MerkleTreeScheme<F, Digest: DeserializeBytes>,
+	Challenger_: Challenger,
+{
+	type AuthenticatedOpening = basefold::AuthenticatedLinearRelationOpening<F, MerkleScheme_::Digest>;
+
+	fn open_authenticated_linear_relation(
+		&mut self,
+		oracle: Self::Oracle,
+		claim: F,
+	) -> Result<Self::AuthenticatedOpening, Error> {
+		BaseFoldVerifierChannel::open_authenticated_linear_relation(self, oracle, claim)
+	}
+}
+
+impl<F, MerkleScheme_, Challenger_> IOPVerifierChannel<F>
+	for BaseFoldVerifierChannel<'_, F, MerkleScheme_, Challenger_>
+where
+	F: BinaryField,
+	MerkleScheme_: MerkleTreeScheme<F, Digest: DeserializeBytes>,
+	Challenger_: Challenger,
+{
 	fn verify_oracle_relations(
 		&mut self,
 		oracle_relations: impl IntoIterator<Item = OracleLinearRelation<Self::Oracle, Self::Elem>>,
 	) -> Result<(), Error> {
-		assert!(
-			self.remaining_oracle_specs().is_empty(),
-			"verify_oracle_relations called but {} oracle specs remaining",
-			self.remaining_oracle_specs().len()
-		);
-
-		// Process each oracle relation with its own BaseFold verification
 		for relation in oracle_relations {
-			let index = relation.oracle.index;
-			assert!(
-				index < self.oracle_commitments.len(),
-				"oracle index {index} out of bounds, expected < {}",
-				self.oracle_commitments.len()
-			);
-
-			let fri_params = &self.fri_params[index];
-			let commitment = self.oracle_commitments[index].clone();
-
-			// Run BaseFold verification (non-ZK variant).
-			let basefold::ReducedOutput {
-				final_fri_value,
-				final_sumcheck_value,
-				challenges,
-			} = basefold::verify(
-				fri_params,
-				self.merkle_scheme,
-				commitment,
-				relation.claim,
-				self.transcript,
-			)?;
-
-			// Reverse challenges to get evaluation point in correct order (low-to-high)
-			let mut eval_point = challenges;
-			eval_point.reverse();
-
-			// Evaluate the transparent polynomial at the challenge point
-			let transparent_eval = (relation.transparent)(&eval_point);
-
-			// Verify: eval_numerator == eval_denominator * transparent_eval
-			self.assert_zero(final_sumcheck_value - final_fri_value * transparent_eval)?;
+			self.verify_linear_relation(relation)?;
 		}
 
 		Ok(())

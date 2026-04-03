@@ -1,10 +1,13 @@
 // Copyright 2025 Irreducible Inc.
 
 use binius_core::{constraint_system::ConstraintSystem, word::Word};
-use binius_field::{AESTowerField8b as B8, BinaryField, ExtensionField};
+use binius_field::{AESTowerField8b as B8, BinaryField, Field};
 use binius_iop::{
+	basefold,
 	basefold_compiler::BaseFoldVerifierCompiler,
-	channel::{IOPVerifierChannel, OracleLinearRelation, OracleSpec},
+	channel::{
+		AuthenticatedOpeningVerifierChannel, IOPVerifierChannel, OracleLinearRelation, OracleSpec,
+	},
 };
 use binius_ip::channel::IPVerifierChannel;
 use binius_math::{
@@ -25,11 +28,15 @@ use super::error::Error;
 use crate::{
 	and_reduction::verifier::{AndCheckOutput, verify_with_channel},
 	config::{
-		B1, B128, LOG_WORD_SIZE_BITS, LOG_WORDS_PER_ELEM, PROVER_SMALL_FIELD_ZEROCHECK_CHALLENGES,
+		B128, LOG_WORD_SIZE_BITS, LOG_WORDS_PER_ELEM, PROVER_SMALL_FIELD_ZEROCHECK_CHALLENGES,
 	},
 	fri::{ConstantArityStrategy, FRIParams, calculate_n_test_queries},
 	hash::PseudoCompressionFunction,
 	merkle_tree::BinaryMerkleTreeScheme,
+	pcs::{
+		AuthenticatedIopPcsOpening, AuthenticatedPcsOpening, IopPcsOpeningOutput,
+		PcsOpeningOutput as GenericPcsOpeningOutput,
+	},
 	protocols::{
 		intmul::{IntMulOutput, verify as verify_intmul_reduction},
 		shift::{self, OperatorData},
@@ -38,6 +45,12 @@ use crate::{
 };
 
 pub const SECURITY_BITS: usize = 96;
+
+/// Semantic PCS-opening output for the standard native BaseFold-backed verifier path.
+pub type PcsOpeningOutput = IopPcsOpeningOutput<B128>;
+
+/// Authenticated PCS-opening output for the standard native BaseFold-backed verifier path.
+pub type AuthenticatedPcsOpeningOutput<D> = AuthenticatedIopPcsOpening<B128, D>;
 
 /// Struct for verifying instances of a particular constraint system.
 ///
@@ -161,6 +174,40 @@ where
 		public: &[Word],
 		transcript: &mut VerifierTranscript<Challenger_>,
 	) -> Result<(), Error> {
+		self.verify_with_pcs_opening(public, transcript).map(|_| ())
+	}
+
+	/// Run the native transcript-backed verifier and surface the typed PCS-opening object used in
+	/// the final transparent-polynomial check.
+	pub fn verify_with_pcs_opening<Challenger_: Challenger>(
+		&self,
+		public: &[Word],
+		transcript: &mut VerifierTranscript<Challenger_>,
+	) -> Result<PcsOpeningOutput, Error> {
+		let authenticated = self.verify_with_authenticated_pcs_opening(public, transcript)?;
+		let basefold::OpenedLinearRelationWithSampling { opened, sampling } =
+			basefold::finalize_authenticated_opening(self.fri_params(), authenticated.opening)?;
+		let transparent_eval = authenticated.relation.eval(&opened.query_point);
+		let output = GenericPcsOpeningOutput {
+			relation: authenticated.relation,
+			sumcheck_claim: authenticated.sumcheck_claim,
+			opened,
+			sampling,
+			transparent_eval,
+		};
+		if output.consistency_error() != B128::ZERO {
+			return Err(binius_ip::channel::Error::InvalidAssert.into());
+		}
+		Ok(output)
+	}
+
+	/// Run the native transcript-backed verifier and stop at the authenticated PCS-opening
+	/// boundary, before the final pure IOP semantic finalization step.
+	pub fn verify_with_authenticated_pcs_opening<Challenger_: Challenger>(
+		&self,
+		public: &[Word],
+		transcript: &mut VerifierTranscript<Challenger_>,
+	) -> Result<AuthenticatedPcsOpeningOutput<Output<MerkleHash>>, Error> {
 		// Check that the public input length is correct
 		if public.len() != 1 << self.log_public_words() {
 			return Err(Error::IncorrectPublicInputLength {
@@ -172,12 +219,12 @@ where
 		// Verifier observes the public input (includes it in Fiat-Shamir).
 		transcript.observe().write_slice(public);
 
-		// Create channel and delegate to verify_iop
+		// Create the native BaseFold channel and drive the authenticated PCS-opening path.
 		let mut channel = self.iop_compiler.create_channel(transcript);
-		self.verify_iop(public, &mut channel)
+		self.verify_iop_authenticated(public, &mut channel)
 	}
 
-	fn verify_iop<Channel>(&self, public: &[Word], channel: &mut Channel) -> Result<(), Error>
+	pub fn verify_iop<Channel>(&self, public: &[Word], channel: &mut Channel) -> Result<(), Error>
 	where
 		Channel: IOPVerifierChannel<B128, Elem = B128>,
 	{
@@ -292,16 +339,12 @@ where
 		// Ring-switching verification
 		let eval_point = [shift_output.r_j(), shift_output.r_y()].concat();
 		let ring_switch::RingSwitchVerifyOutput {
-			eq_r_double_prime,
+			relation,
 			sumcheck_claim,
 		} = ring_switch::verify(shift_output.witness_eval(), &eval_point, channel)?;
 
 		// Build the transparent closure for the ring-switching equality indicator
-		let log_packing = <B128 as ExtensionField<B1>>::LOG_DEGREE;
-		let eval_point_high = eval_point[log_packing..].to_vec();
-		let transparent = Box::new(move |point: &[B128]| {
-			ring_switch::eval_rs_eq(&eval_point_high, point, eq_r_double_prime.as_ref())
-		});
+		let transparent = Box::new(move |point: &[B128]| relation.eval(point));
 
 		// Verify oracle relations (runs BaseFold internally and verifies the product check)
 		channel.verify_oracle_relations([OracleLinearRelation {
@@ -313,6 +356,135 @@ where
 		drop(pcs_guard);
 
 		Ok(())
+	}
+
+	fn verify_iop_authenticated<Channel, D>(
+		&self,
+		public: &[Word],
+		channel: &mut Channel,
+	) -> Result<AuthenticatedPcsOpeningOutput<D>, Error>
+	where
+		Channel: AuthenticatedOpeningVerifierChannel<
+			B128,
+			Elem = B128,
+			AuthenticatedOpening = basefold::AuthenticatedLinearRelationOpening<B128, D>,
+		>,
+	{
+		let _verify_guard =
+			tracing::info_span!("Verify", operation = "verify", perfetto_category = "operation")
+				.entered();
+
+		let subfield_subspace = BinarySubspace::<B8>::default().isomorphic();
+		let extended_subspace = subfield_subspace.reduce_dim(LOG_WORD_SIZE_BITS + 1);
+		let domain_subspace = extended_subspace.reduce_dim(LOG_WORD_SIZE_BITS);
+
+		let trace_oracle = channel.recv_oracle()?;
+
+		let intmul_guard = tracing::info_span!(
+			"[phase] Verify IntMul Reduction",
+			phase = "verify_intmul_reduction",
+			perfetto_category = "phase",
+			n_constraints = self.constraint_system.n_mul_constraints()
+		)
+		.entered();
+		let log_n_constraints = checked_log_2(self.constraint_system.n_mul_constraints());
+		let intmul_output =
+			verify_intmul_reduction::<B128, _>(LOG_WORD_SIZE_BITS, log_n_constraints, channel)?;
+		drop(intmul_guard);
+
+		let bitand_guard = tracing::info_span!(
+			"[phase] Verify BitAnd Reduction",
+			phase = "verify_bitand_reduction",
+			perfetto_category = "phase",
+			n_constraints = self.constraint_system.n_and_constraints()
+		)
+		.entered();
+		let bitand_claim = {
+			let log_n_constraints = checked_log_2(self.constraint_system.n_and_constraints());
+			let AndCheckOutput {
+				a_eval,
+				b_eval,
+				c_eval,
+				z_challenge,
+				eval_point,
+			}: AndCheckOutput<B128> =
+				verify_bitand_reduction(log_n_constraints, &extended_subspace, channel)?;
+			OperatorData::new(z_challenge, eval_point, [a_eval, b_eval, c_eval])
+		};
+		drop(bitand_guard);
+
+		let intmul_claim = {
+			let IntMulOutput {
+				a_evals,
+				b_evals,
+				c_lo_evals,
+				c_hi_evals,
+				eval_point,
+			} = intmul_output;
+
+			let r_zhat_prime = bitand_claim.r_zhat_prime;
+			let l_tilde = lagrange_evals(&domain_subspace, r_zhat_prime);
+			let make_final_claim = |evals| inner_product(evals, l_tilde.iter_scalars());
+			OperatorData::new(
+				r_zhat_prime,
+				eval_point,
+				[
+					make_final_claim(a_evals),
+					make_final_claim(b_evals),
+					make_final_claim(c_lo_evals),
+					make_final_claim(c_hi_evals),
+				],
+			)
+		};
+
+		let constraint_guard = tracing::info_span!(
+			"[phase] Verify Shift Reduction",
+			phase = "verify_shift_reduction",
+			perfetto_category = "phase"
+		)
+		.entered();
+		let shift_output =
+			shift::verify(self.constraint_system(), public, &bitand_claim, &intmul_claim, channel)?;
+		drop(constraint_guard);
+
+		let public_guard = tracing::info_span!(
+			"[phase] Verify Public Input",
+			phase = "verify_public_input",
+			perfetto_category = "phase"
+		)
+		.entered();
+		shift::check_eval(
+			self.constraint_system(),
+			&bitand_claim,
+			&intmul_claim,
+			&domain_subspace,
+			&shift_output,
+		)?;
+		drop(public_guard);
+
+		let pcs_guard = tracing::info_span!(
+			"[phase] Verify PCS Opening",
+			phase = "verify_pcs_opening",
+			perfetto_category = "phase"
+		)
+		.entered();
+
+		let eval_point = [shift_output.r_j(), shift_output.r_y()].concat();
+		let ring_switch::RingSwitchVerifyOutput {
+			relation,
+			sumcheck_claim,
+		} = ring_switch::verify(shift_output.witness_eval(), &eval_point, channel)?;
+
+		let opening = channel.open_authenticated_linear_relation(trace_oracle, sumcheck_claim)?;
+		let output = AuthenticatedPcsOpening {
+			relation: relation.into(),
+			sumcheck_claim,
+			opening,
+		};
+
+		drop(pcs_guard);
+
+		Ok(output)
 	}
 }
 

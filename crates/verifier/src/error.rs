@@ -1,6 +1,7 @@
 // Copyright 2025 Irreducible Inc.
 
 use binius_core::ConstraintSystemError;
+use binius_iop::basefold::Error as BaseFoldError;
 use binius_iop::channel::Error as IOPChannelError;
 use binius_ip::channel::Error as ChannelError;
 
@@ -20,6 +21,8 @@ pub enum Error {
 	IOPChannel(#[from] IOPChannelError),
 	#[error("FRI error: {0}")]
 	FRI(#[from] fri::Error),
+	#[error("BaseFold error: {0}")]
+	BaseFold(#[from] BaseFoldError),
 	#[error("ring switch error: {0}")]
 	RingSwitch(#[from] ring_switch::Error),
 	#[error("IntMul error: {0}")]
