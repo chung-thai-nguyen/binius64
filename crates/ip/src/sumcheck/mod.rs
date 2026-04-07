@@ -3,6 +3,7 @@
 mod batch;
 pub mod common;
 mod error;
+pub mod hax_matched_sumcheck;
 mod verify;
 
 pub use batch::*;

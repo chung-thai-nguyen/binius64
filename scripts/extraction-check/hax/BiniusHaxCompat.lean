@@ -4,6 +4,37 @@ open Std.Do
 open Std.Tactic
 open rust_primitives.sequence
 
+namespace rust_primitives.hax
+
+partial def while_loop_return
+    {β : Type}
+    {γ : Type}
+    (_inv : β → RustM Bool)
+    (cond : β → RustM Bool)
+    (_termination : β → RustM hax_lib.int.Int)
+    (init : β)
+    (body : β → RustM
+      (core_models.ops.control_flow.ControlFlow
+        (core_models.ops.control_flow.ControlFlow
+          γ
+          (rust_primitives.hax.Tuple2 rust_primitives.hax.Tuple0 β))
+        β)) :
+    RustM (core_models.ops.control_flow.ControlFlow γ β) := do
+  if ← cond init then
+    match ← body init with
+    | core_models.ops.control_flow.ControlFlow.Break
+      (core_models.ops.control_flow.ControlFlow.Break ret) =>
+        pure (core_models.ops.control_flow.ControlFlow.Break ret)
+    | core_models.ops.control_flow.ControlFlow.Break
+      (core_models.ops.control_flow.ControlFlow.Continue ret) =>
+        pure (core_models.ops.control_flow.ControlFlow.Continue ret._1)
+    | core_models.ops.control_flow.ControlFlow.Continue next =>
+        while_loop_return _inv cond _termination next body
+  else
+    pure (core_models.ops.control_flow.ControlFlow.Continue init)
+
+end rust_primitives.hax
+
 namespace alloc.vec
 
 @[spec]

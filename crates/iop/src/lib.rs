@@ -36,3 +36,8 @@ pub mod merkle_tree;
 pub mod naive_channel;
 pub mod protocol_boundary;
 pub mod size_tracking_channel;
+
+/// Matched toy sumcheck (single round, domain {0,1}, deg 1, F_17) for Hax / ArkLib alignment.
+/// Implementation file: `binius_ip::sumcheck::hax_matched_sumcheck`.
+#[path = "../../ip/src/sumcheck/hax_matched_sumcheck.rs"]
+pub mod sumcheck_matched_extract;

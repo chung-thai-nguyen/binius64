@@ -143,6 +143,19 @@ path.write_text(text.replace(old, new))
 PY
 }
 
+patch_hax_instance_attrs() {
+  local file="$1"
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+text = text.replace("[instance_reducible, instance]", "[reducible, instance]")
+path.write_text(text)
+PY
+}
+
 write_hax_check_package() {
   local dir="$EXTRACTION_DIR/check-hax-pcs"
   mkdir -p "$dir"
@@ -157,6 +170,8 @@ write_hax_check_package() {
   prepend_imports "$dir/BiniusVerifier.lean" $'import BiniusField\nimport BiniusHaxCompat\nimport BiniusIop\n'
   patch_hax_singleton_literals "$dir/BiniusIop.lean"
   patch_hax_singleton_literals "$dir/BiniusVerifier.lean"
+  patch_hax_instance_attrs "$dir/BiniusIop.lean"
+  patch_hax_instance_attrs "$dir/BiniusVerifier.lean"
 
   cat > "$dir/lakefile.lean" <<EOF
 import Lake
@@ -229,7 +244,7 @@ run_hax() {
     HAX_ENGINE_BINARY="$HAX_ENGINE_BINARY" \
       cargo hax -C -p binius-iop ';' \
       into \
-      -i '-** +binius_iop::basefold_extract::verify_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::verify_authenticated_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::finalize_authenticated_128b_ghash_extract +binius_iop::basefold_extract::ExtractBasefoldStatement +binius_iop::basefold_extract::ExtractBasefoldProofView +binius_iop::basefold_extract::ExtractBasefoldSamplingView +binius_iop::basefold_extract::ExtractBasefoldTranscriptView +binius_iop::basefold_extract::ExtractSamplingTrace +binius_iop::basefold_extract::ExtractOpenedLinearRelation +binius_iop::basefold_extract::ExtractOpenedLinearRelationWithSampling +binius_iop::basefold_extract::ExtractReducedOutput +binius_iop::basefold_extract::ExtractAuthenticatedLinearRelationOpening +binius_iop::basefold::ReducedOutput +binius_iop::basefold::SamplingTrace +binius_iop::basefold::OpenedLinearRelation +binius_iop::basefold::OpenedLinearRelationWithSampling +binius_iop::basefold::query_point_from_challenges +binius_iop::basefold::opened_linear_relation_from_challenges' \
+      -i '-** +binius_iop::basefold_extract::verify_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::verify_authenticated_statement_transcript_128b_ghash_extract +binius_iop::basefold_extract::finalize_authenticated_128b_ghash_extract +binius_iop::basefold_extract::ExtractBasefoldStatement +binius_iop::basefold_extract::ExtractBasefoldProofView +binius_iop::basefold_extract::ExtractBasefoldSamplingView +binius_iop::basefold_extract::ExtractBasefoldTranscriptView +binius_iop::basefold_extract::ExtractSamplingTrace +binius_iop::basefold_extract::ExtractOpenedLinearRelation +binius_iop::basefold_extract::ExtractOpenedLinearRelationWithSampling +binius_iop::basefold_extract::ExtractReducedOutput +binius_iop::basefold_extract::ExtractAuthenticatedLinearRelationOpening +binius_iop::basefold::ReducedOutput +binius_iop::basefold::SamplingTrace +binius_iop::basefold::OpenedLinearRelation +binius_iop::basefold::OpenedLinearRelationWithSampling +binius_iop::basefold::query_point_from_challenges +binius_iop::basefold::opened_linear_relation_from_challenges +binius_iop::sumcheck_matched_extract::MATCHED_SUMCHECK_PRIME +binius_iop::sumcheck_matched_extract::matched_mod_reduce +binius_iop::sumcheck_matched_extract::matched_add +binius_iop::sumcheck_matched_extract::matched_mul +binius_iop::sumcheck_matched_extract::matched_univariate_eval +binius_iop::sumcheck_matched_extract::matched_sumcheck_round_check +binius_iop::sumcheck_matched_extract::matched_sumcheck_advance' \
       --output-dir "$EXTRACTION_DIR/hax-basefold-extract" \
       lean
   )

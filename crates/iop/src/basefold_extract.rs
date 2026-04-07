@@ -10,52 +10,74 @@ use binius_field::BinaryField128bGhash;
 
 use crate::basefold::ReducedOutput;
 use crate::fri::verify::{AuthenticatedFRIQueryPhase, OpenedFRIQuery, OpenedFRIQueryPhase};
-use crate::protocol_boundary::{
-	AuthenticatedStatementTranscriptProtocol, StatementTranscriptProtocol,
-};
+use crate::protocol_boundary::AuthenticatedStatementTranscriptProtocol;
 
-pub trait F: Copy + Clone + PartialEq {
-    const ZERO: Self;
-    const ONE: Self;
-    fn add(self, rhs: Self) -> Self;
-    fn mul(self, rhs: Self) -> Self;
-    fn sub(self, rhs: Self) -> Self;
+pub trait ExtractField: Copy + Clone + PartialEq + Eq {
+	fn zero() -> Self;
+	fn one() -> Self;
+	fn add(self, rhs: Self) -> Self;
+	fn mul(self, rhs: Self) -> Self;
+	fn sub(self, rhs: Self) -> Self;
+	fn from_u128(value: u128) -> Self;
+	fn to_u128(self) -> u128;
 }
 
-impl<T: binius_field::Field> F for T {
-    const ZERO: Self = <T as binius_field::Field>::ZERO;
-    const ONE: Self = <T as binius_field::Field>::ONE;
-    fn add(self, rhs: Self) -> Self { self + rhs }
-    fn mul(self, rhs: Self) -> Self { self * rhs }
-    fn sub(self, rhs: Self) -> Self { self - rhs }
+impl ExtractField for BinaryField128bGhash {
+	fn zero() -> Self {
+		Self::new(0)
+	}
+
+	fn one() -> Self {
+		Self::new(1)
+	}
+
+	fn add(self, rhs: Self) -> Self {
+		self + rhs
+	}
+
+	fn mul(self, rhs: Self) -> Self {
+		self * rhs
+	}
+
+	fn sub(self, rhs: Self) -> Self {
+		self - rhs
+	}
+
+	fn from_u128(value: u128) -> Self {
+		Self::new(value)
+	}
+
+	fn to_u128(self) -> u128 {
+		self.val()
+	}
 }
 pub type ExtractDigest = [u8; 32];
 
 /// Monomorphic verifier randomness used by the extraction-oriented BaseFold / FRI opening path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractSamplingTrace<F: ExtractField> {
-	pub challenges: Vec<ExtractField>,
+pub struct ExtractSamplingTrace<F: ExtractField = BinaryField128bGhash> {
+	pub challenges: Vec<F>,
 	pub query_indices: Vec<usize>,
 }
 
 /// Monomorphic semantic opening object produced by the extraction-oriented BaseFold / FRI path.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractOpenedLinearRelation<F: ExtractField> {
+pub struct ExtractOpenedLinearRelation<F: ExtractField = BinaryField128bGhash> {
 	pub final_fri_value: F,
 	pub final_sumcheck_value: F,
-	pub query_point: Vec<ExtractField>,
+	pub query_point: Vec<F>,
 }
 
 /// Monomorphic opening object paired with the verifier randomness used to obtain it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractOpenedLinearRelationWithSampling<F: ExtractField> {
+pub struct ExtractOpenedLinearRelationWithSampling<F: ExtractField = BinaryField128bGhash> {
 	pub opened: ExtractOpenedLinearRelation<F>,
 	pub sampling: ExtractSamplingTrace<F>,
 }
 
 /// Monomorphic BaseFold / FRI reduced opening output exported to Hax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractReducedOutput<F: ExtractField> {
+pub struct ExtractReducedOutput<F: ExtractField = BinaryField128bGhash> {
 	pub final_fri_value: F,
 	pub final_sumcheck_value: F,
 	pub sampling: ExtractSamplingTrace<F>,
@@ -64,7 +86,7 @@ pub struct ExtractReducedOutput<F: ExtractField> {
 /// Monomorphic authenticated BaseFold / FRI opening after transcript / Merkle checks but before
 /// the pure IOP semantic finalization step.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractAuthenticatedLinearRelationOpening<F: ExtractField> {
+pub struct ExtractAuthenticatedLinearRelationOpening<F: ExtractField = BinaryField128bGhash> {
 	pub final_sumcheck_value: F,
 	pub sampling: ExtractSamplingTrace<F>,
 	pub query_phase: AuthenticatedFRIQueryPhase<F, ExtractDigest>,
@@ -73,43 +95,43 @@ pub struct ExtractAuthenticatedLinearRelationOpening<F: ExtractField> {
 
 /// Monomorphic BaseFold / FRI statement exported to Hax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractBasefoldStatement<F: ExtractField> {
-	pub params: ExtractFriParams,
+pub struct ExtractBasefoldStatement<F: ExtractField = BinaryField128bGhash> {
+	pub params: ExtractFriParams<F>,
 	pub codeword_commitment: ExtractDigest,
 	pub evaluation_claim: F,
 }
 
 /// Monomorphic prover-message view for BaseFold / FRI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractBasefoldProofView<F: ExtractField> {
+pub struct ExtractBasefoldProofView<F: ExtractField = BinaryField128bGhash> {
 	pub round_coeffs: Vec<[F; 2]>,
 	pub commitments: Vec<ExtractDigest>,
-	pub decommitment_scalars: Vec<Vec<ExtractField>>,
+	pub decommitment_scalars: Vec<Vec<F>>,
 	pub decommitments: Vec<Vec<ExtractDigest>>,
-	pub merkle_vectors: Vec<ExtractMerkleVector>,
-	pub merkle_openings: Vec<ExtractMerkleOpening>,
+	pub merkle_vectors: Vec<ExtractMerkleVector<F>>,
+	pub merkle_openings: Vec<ExtractMerkleOpening<F>>,
 	pub merkle_layers: Vec<ExtractMerkleLayer>,
 }
 
 /// Monomorphic verifier-randomness view for BaseFold / FRI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractBasefoldSamplingView<F: ExtractField> {
-	pub challenges: Vec<ExtractField>,
+pub struct ExtractBasefoldSamplingView<F: ExtractField = BinaryField128bGhash> {
+	pub challenges: Vec<F>,
 	pub query_indices: Vec<usize>,
 }
 
 /// Monomorphic public-coin interaction view for BaseFold / FRI.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractBasefoldTranscriptView<F: ExtractField> {
+pub struct ExtractBasefoldTranscriptView<F: ExtractField = BinaryField128bGhash> {
 	pub proof: ExtractBasefoldProofView<F>,
 	pub sampling: ExtractBasefoldSamplingView<F>,
 }
 
 /// Thin protocol-boundary marker for the extraction-oriented BaseFold / FRI verifier.
-pub struct ExtractBasefoldProtocol<F: ExtractField>;
+pub struct ExtractBasefoldProtocol;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractFriParams {
+pub struct ExtractFriParams<F: ExtractField = BinaryField128bGhash> {
 	pub log_msg_len: usize,
 	pub log_batch_size: usize,
 	pub fold_arities: Vec<usize>,
@@ -118,10 +140,10 @@ pub struct ExtractFriParams {
 	pub n_final_challenges: usize,
 	pub n_test_queries: usize,
 	pub layer_depths: Vec<usize>,
-	pub twiddle_evals: Vec<Vec<ExtractField>>,
+	pub twiddle_evals: Vec<Vec<F>>,
 }
 
-impl ExtractFriParams {
+impl<F: ExtractField> ExtractFriParams<F> {
 	pub fn n_oracles(&self) -> usize {
 		1 + self.fold_arities.len()
 	}
@@ -140,16 +162,16 @@ pub enum ExtractError {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractMerkleVector {
+pub struct ExtractMerkleVector<F: ExtractField = BinaryField128bGhash> {
 	pub root: ExtractDigest,
-	pub data: Vec<ExtractField>,
+	pub data: Vec<F>,
 	pub batch_size: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractMerkleOpening {
+pub struct ExtractMerkleOpening<F: ExtractField = BinaryField128bGhash> {
 	pub index: usize,
-	pub values: Vec<ExtractField>,
+	pub values: Vec<F>,
 	pub layer_depth: usize,
 	pub tree_depth: usize,
 	pub layer_digests: Vec<ExtractDigest>,
@@ -163,15 +185,15 @@ pub struct ExtractMerkleLayer {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ExtractProofOracle {
+pub struct ExtractProofOracle<F: ExtractField = BinaryField128bGhash> {
 	pub round_coeffs: Vec<[F; 2]>,
 	pub commitments: Vec<ExtractDigest>,
-	pub decommitment_scalars: Vec<Vec<ExtractField>>,
+	pub decommitment_scalars: Vec<Vec<F>>,
 	pub decommitments: Vec<Vec<ExtractDigest>>,
-	pub challenges: Vec<ExtractField>,
+	pub challenges: Vec<F>,
 	pub query_indices: Vec<usize>,
-	pub merkle_vectors: Vec<ExtractMerkleVector>,
-	pub merkle_openings: Vec<ExtractMerkleOpening>,
+	pub merkle_vectors: Vec<ExtractMerkleVector<F>>,
+	pub merkle_openings: Vec<ExtractMerkleOpening<F>>,
 	pub merkle_layers: Vec<ExtractMerkleLayer>,
 
 	round_coeffs_pos: usize,
@@ -185,7 +207,21 @@ pub struct ExtractProofOracle {
 	merkle_layers_pos: usize,
 }
 
-impl ExtractProofOracle {
+impl<F: ExtractField> ExtractProofOracle<F> {
+	fn vec_scalars_eq(lhs: &[F], rhs: &[F]) -> bool {
+		if lhs.len() != rhs.len() {
+			return false;
+		}
+		let mut i = 0;
+		while i < lhs.len() {
+			if lhs[i] != rhs[i] {
+				return false;
+			}
+			i += 1;
+		}
+		true
+	}
+
 	pub fn read_round_coeffs(&mut self) -> Result<[F; 2], ExtractError> {
 		if let Some(value) = self.round_coeffs.get(self.round_coeffs_pos) {
 			self.round_coeffs_pos += 1;
@@ -221,7 +257,7 @@ impl ExtractProofOracle {
 	pub fn read_decommitment_scalars(
 		&mut self,
 		n: usize,
-	) -> Result<Vec<ExtractField>, ExtractError> {
+	) -> Result<Vec<F>, ExtractError> {
 		if let Some(value_ref) = self.decommitment_scalars.get(self.decommitment_scalars_pos) {
 			let value = value_ref.clone();
 			self.decommitment_scalars_pos += 1;
@@ -256,7 +292,7 @@ impl ExtractProofOracle {
 	pub fn read_merkle_vector(
 		&mut self,
 		value_len: usize,
-	) -> Result<ExtractMerkleVector, ExtractError> {
+	) -> Result<ExtractMerkleVector<F>, ExtractError> {
 		let data = self.read_decommitment_scalars(value_len)?;
 		if let Some(expected_ref) = self.merkle_vectors.get(self.merkle_vectors_pos) {
 			let expected = expected_ref.clone();
@@ -264,7 +300,7 @@ impl ExtractProofOracle {
 			if expected.data.len() != value_len {
 				return Err(ExtractError::IncorrectProofShape);
 			}
-			if expected.data != data {
+			if !Self::vec_scalars_eq(&expected.data, &data) {
 				return Err(ExtractError::MerkleVectorMismatch);
 			}
 			Ok(expected)
@@ -276,7 +312,7 @@ impl ExtractProofOracle {
 	pub fn read_merkle_opening(
 		&mut self,
 		value_len: usize,
-	) -> Result<ExtractMerkleOpening, ExtractError> {
+	) -> Result<ExtractMerkleOpening<F>, ExtractError> {
 		let values = self.read_decommitment_scalars(value_len)?;
 		if let Some(expected_ref) = self.merkle_openings.get(self.merkle_openings_pos) {
 			let expected = expected_ref.clone();
@@ -284,7 +320,7 @@ impl ExtractProofOracle {
 			if expected.values.len() != value_len {
 				return Err(ExtractError::IncorrectProofShape);
 			}
-			if expected.values != values {
+			if !Self::vec_scalars_eq(&expected.values, &values) {
 				return Err(ExtractError::MerkleOpeningMismatch);
 			}
 			Ok(expected)
@@ -326,7 +362,7 @@ impl ExtractProofOracle {
 	}
 }
 
-impl From<&ExtractBasefoldTranscriptView<F>> for ExtractProofOracle {
+impl<F: ExtractField> From<&ExtractBasefoldTranscriptView<F>> for ExtractProofOracle<F> {
 	fn from(value: &ExtractBasefoldTranscriptView<F>) -> Self {
 		Self {
 			round_coeffs: value.proof.round_coeffs.clone(),
@@ -357,7 +393,7 @@ impl<F: ExtractField> ExtractReducedOutput<F> {
 	}
 
 	pub fn opened_linear_relation(&self) -> ExtractOpenedLinearRelation<F> {
-		ExtractOpenedLinearRelation<F> {
+		ExtractOpenedLinearRelation {
 			final_fri_value: self.final_fri_value,
 			final_sumcheck_value: self.final_sumcheck_value,
 			query_point: crate::basefold::query_point_from_challenges(&self.sampling.challenges),
@@ -365,7 +401,7 @@ impl<F: ExtractField> ExtractReducedOutput<F> {
 	}
 
 	pub fn opened_linear_relation_with_sampling(&self) -> ExtractOpenedLinearRelationWithSampling<F> {
-		ExtractOpenedLinearRelationWithSampling<F> {
+		ExtractOpenedLinearRelationWithSampling {
 			opened: self.opened_linear_relation(),
 			sampling: self.sampling_trace(),
 		}
@@ -373,8 +409,8 @@ impl<F: ExtractField> ExtractReducedOutput<F> {
 
 	pub fn into_opened_linear_relation_with_sampling(self) -> ExtractOpenedLinearRelationWithSampling<F> {
 		let query_point = crate::basefold::query_point_from_challenges(&self.sampling.challenges);
-		ExtractOpenedLinearRelationWithSampling<F> {
-			opened: ExtractOpenedLinearRelation<F> {
+		ExtractOpenedLinearRelationWithSampling {
+			opened: ExtractOpenedLinearRelation {
 				final_fri_value: self.final_fri_value,
 				final_sumcheck_value: self.final_sumcheck_value,
 				query_point,
@@ -384,12 +420,12 @@ impl<F: ExtractField> ExtractReducedOutput<F> {
 	}
 }
 
-impl From<ReducedOutput<ExtractField>> for ExtractReducedOutput<F> {
-	fn from(value: ReducedOutput<ExtractField>) -> Self {
+impl<F: ExtractField> From<ReducedOutput<F>> for ExtractReducedOutput<F> {
+	fn from(value: ReducedOutput<F>) -> Self {
 		Self {
 			final_fri_value: value.final_fri_value,
 			final_sumcheck_value: value.final_sumcheck_value,
-			sampling: ExtractSamplingTrace<F> {
+			sampling: ExtractSamplingTrace {
 				challenges: value.challenges,
 				query_indices: value.query_indices,
 			},
@@ -402,21 +438,21 @@ impl<F: ExtractField> ExtractBasefoldStatement<F> {
 		&self,
 		transcript: &ExtractBasefoldTranscriptView<F>,
 	) -> Result<ExtractReducedOutput<F>, ExtractError> {
-		ExtractBasefoldProtocol<F>::verify_statement_transcript(self, transcript)
+		verify_statement_transcript_extract(self, transcript)
 	}
 
 	pub fn verify_authenticated_transcript(
 		&self,
 		transcript: &ExtractBasefoldTranscriptView<F>,
 	) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
-		ExtractBasefoldProtocol<F>::verify_authenticated_statement_transcript(self, transcript)
+		verify_authenticated_statement_transcript_extract(self, transcript)
 	}
 
 	pub fn verify_authenticated(
 		&self,
 		authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
 	) -> Result<ExtractReducedOutput<F>, ExtractError> {
-		ExtractBasefoldProtocol<F>::verify_authenticated(self, authenticated)
+		verify_authenticated_extract(&self.params, authenticated)
 	}
 
 	pub fn finalize_authenticated(
@@ -427,11 +463,11 @@ impl<F: ExtractField> ExtractBasefoldStatement<F> {
 	}
 }
 
-impl AuthenticatedStatementTranscriptProtocol for ExtractBasefoldProtocol<F> {
-	type Statement = ExtractBasefoldStatement<F>;
-	type TranscriptView = ExtractBasefoldTranscriptView<F>;
-	type Authenticated = ExtractAuthenticatedLinearRelationOpening<F>;
-	type Output = ExtractReducedOutput<F>;
+impl AuthenticatedStatementTranscriptProtocol for ExtractBasefoldProtocol {
+	type Statement = ExtractBasefoldStatement<BinaryField128bGhash>;
+	type TranscriptView = ExtractBasefoldTranscriptView<BinaryField128bGhash>;
+	type Authenticated = ExtractAuthenticatedLinearRelationOpening<BinaryField128bGhash>;
+	type Output = ExtractReducedOutput<BinaryField128bGhash>;
 	type Error = ExtractError;
 
 	fn verify_authenticated_statement_transcript(
@@ -449,7 +485,7 @@ impl AuthenticatedStatementTranscriptProtocol for ExtractBasefoldProtocol<F> {
 	}
 }
 
-pub fn verify_statement_transcript_extract(
+pub fn verify_statement_transcript_extract<F: ExtractField>(
 	statement: &ExtractBasefoldStatement<F>,
 	transcript: &ExtractBasefoldTranscriptView<F>,
 ) -> Result<ExtractReducedOutput<F>, ExtractError> {
@@ -458,11 +494,11 @@ pub fn verify_statement_transcript_extract(
 	verify_authenticated_extract(&statement.params, authenticated)
 }
 
-pub fn verify_authenticated_statement_transcript_extract(
+pub fn verify_authenticated_statement_transcript_extract<F: ExtractField>(
 	statement: &ExtractBasefoldStatement<F>,
 	transcript: &ExtractBasefoldTranscriptView<F>,
 ) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
-	let mut oracle = ExtractProofOracle::from(transcript);
+	let mut oracle = ExtractProofOracle::<F>::from(transcript);
 	let output = open_authenticated_extract(
 		&statement.params,
 		statement.codeword_commitment,
@@ -476,22 +512,22 @@ pub fn verify_authenticated_statement_transcript_extract(
 	}
 }
 
-pub fn verify_scripted_extract(
-	params: &ExtractFriParams,
+pub fn verify_scripted_extract<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	codeword_commitment: ExtractDigest,
 	evaluation_claim: F,
-	oracle: &mut ExtractProofOracle,
+	oracle: &mut ExtractProofOracle<F>,
 ) -> Result<ExtractReducedOutput<F>, ExtractError> {
 	let authenticated =
 		open_authenticated_extract(params, codeword_commitment, evaluation_claim, oracle)?;
 	verify_authenticated_extract(params, authenticated)
 }
 
-pub fn open_authenticated_extract(
-	params: &ExtractFriParams,
+pub fn open_authenticated_extract<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	codeword_commitment: ExtractDigest,
 	evaluation_claim: F,
-	oracle: &mut ExtractProofOracle,
+	oracle: &mut ExtractProofOracle<F>,
 ) -> Result<ExtractAuthenticatedLinearRelationOpening<F>, ExtractError> {
 	let n_vars = params.log_msg_len;
 	let commitment_rounds =
@@ -516,9 +552,9 @@ pub fn open_authenticated_extract(
 
 	let query_phase = open_fri_scripted(params, codeword_commitment, &round_commitments, oracle)?;
 
-	Ok(ExtractAuthenticatedLinearRelationOpening<F> {
+	Ok(ExtractAuthenticatedLinearRelationOpening {
 		final_sumcheck_value: sum,
-		sampling: ExtractSamplingTrace<F> {
+		sampling: ExtractSamplingTrace {
 			challenges,
 			query_indices: query_phase.query_indices.clone(),
 		},
@@ -527,8 +563,8 @@ pub fn open_authenticated_extract(
 	})
 }
 
-pub fn verify_authenticated_extract(
-	params: &ExtractFriParams,
+pub fn verify_authenticated_extract<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
 ) -> Result<ExtractReducedOutput<F>, ExtractError> {
 	let opened_fri = verify_opened_fri_scripted(
@@ -536,23 +572,23 @@ pub fn verify_authenticated_extract(
 		&authenticated.sampling.challenges,
 		authenticated.query_phase,
 	)?;
-	Ok(ExtractReducedOutput<F> {
+	Ok(ExtractReducedOutput {
 		final_fri_value: opened_fri.final_value,
 		final_sumcheck_value: authenticated.final_sumcheck_value,
 		sampling: authenticated.sampling,
 	})
 }
 
-pub fn finalize_authenticated_extract(
-	params: &ExtractFriParams,
+pub fn finalize_authenticated_extract<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	authenticated: ExtractAuthenticatedLinearRelationOpening<F>,
 ) -> Result<ExtractOpenedLinearRelationWithSampling<F>, ExtractError> {
 	let reduced = verify_authenticated_extract(params, authenticated.clone())?;
 	let query_point = crate::basefold::query_point_from_challenges(
 		&authenticated.sampling.challenges[authenticated.query_challenge_offset..],
 	);
-	Ok(ExtractOpenedLinearRelationWithSampling<F> {
-		opened: ExtractOpenedLinearRelation<F> {
+	Ok(ExtractOpenedLinearRelationWithSampling {
+		opened: ExtractOpenedLinearRelation {
 			final_fri_value: reduced.final_fri_value,
 			final_sumcheck_value: authenticated.final_sumcheck_value,
 			query_point,
@@ -561,11 +597,11 @@ pub fn finalize_authenticated_extract(
 	})
 }
 
-fn open_fri_scripted(
-	params: &ExtractFriParams,
+fn open_fri_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	codeword_commitment: ExtractDigest,
 	round_commitments: &[ExtractDigest],
-	oracle: &mut ExtractProofOracle,
+	oracle: &mut ExtractProofOracle<F>,
 ) -> Result<AuthenticatedFRIQueryPhase<F, ExtractDigest>, ExtractError> {
 	let terminate_codeword_len = 1 << (params.n_final_challenges + params.log_inv_rate);
 	let terminal_vector = oracle.read_merkle_vector(terminate_codeword_len)?;
@@ -652,8 +688,8 @@ fn open_fri_scripted(
 	})
 }
 
-fn verify_opened_fri_scripted(
-	params: &ExtractFriParams,
+fn verify_opened_fri_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	challenges: &[F],
 	authenticated: AuthenticatedFRIQueryPhase<F, ExtractDigest>,
 ) -> Result<OpenedFRIQueryPhase<F, ExtractDigest>, ExtractError> {
@@ -692,10 +728,10 @@ fn verify_opened_fri_scripted(
 	}
 }
 
-fn open_last_oracle_scripted(
-	params: &ExtractFriParams,
+fn open_last_oracle_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	round_commitments: &[ExtractDigest],
-	terminal_vector: &ExtractMerkleVector,
+	terminal_vector: &ExtractMerkleVector<F>,
 ) -> Result<(), ExtractError> {
 	if round_commitments.is_empty() {
 		return Err(ExtractError::IncorrectProofShape);
@@ -709,8 +745,8 @@ fn open_last_oracle_scripted(
 	Ok(())
 }
 
-fn verify_last_oracle_values_scripted(
-	params: &ExtractFriParams,
+fn verify_last_oracle_values_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	fold_challenges: &[F],
 	terminate_codeword: &[F],
 ) -> Result<F, ExtractError> {
@@ -756,12 +792,12 @@ fn verify_last_oracle_values_scripted(
 	}
 }
 
-fn read_opened_query_scripted(
-	params: &ExtractFriParams,
+fn read_opened_query_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	mut index: usize,
 	layers: &[ExtractMerkleLayer],
-	oracle: &mut ExtractProofOracle,
-) -> Result<OpenedFRIQuery<ExtractField>, ExtractError> {
+	oracle: &mut ExtractProofOracle<F>,
+) -> Result<OpenedFRIQuery<F>, ExtractError> {
 	let initial_index = index;
 	let first_layer_depth = params.layer_depths[0];
 	let first_layer = &layers[0].layer_digests;
@@ -802,12 +838,12 @@ fn read_opened_query_scripted(
 	})
 }
 
-fn verify_opened_query_scripted(
-	params: &ExtractFriParams,
+fn verify_opened_query_scripted<F: ExtractField>(
+	params: &ExtractFriParams<F>,
 	interleave_challenges: &[F],
 	fold_challenges: &[F],
 	terminate_codeword: &[F],
-	query: OpenedFRIQuery<ExtractField>,
+	query: OpenedFRIQuery<F>,
 ) -> Result<(), ExtractError> {
 	let OpenedFRIQuery {
 		initial_index,
@@ -859,14 +895,14 @@ fn verify_opened_query_scripted(
 	Ok(())
 }
 
-fn verify_coset_opening_scripted(
-	oracle: &mut ExtractProofOracle,
+fn verify_coset_opening_scripted<F: ExtractField>(
+	oracle: &mut ExtractProofOracle<F>,
 	coset_index: usize,
 	log_coset_size: usize,
 	layer_depth: usize,
 	tree_depth: usize,
 	layer_digests: &[ExtractDigest],
-) -> Result<Vec<ExtractField>, ExtractError> {
+) -> Result<Vec<F>, ExtractError> {
 	let opening = oracle.read_merkle_opening(1 << log_coset_size)?;
 	if opening.index != coset_index
 		|| opening.layer_depth != layer_depth
@@ -914,23 +950,23 @@ fn calculate_fri_commit_rounds(
 	result
 }
 
-fn recover_round_coeffs(sum: F, coeffs: [F; 2]) -> [F; 3] {
+fn recover_round_coeffs<F: ExtractField>(sum: F, coeffs: [F; 2]) -> [F; 3] {
 	let coeff_0 = coeffs[0];
 	let coeff_1 = coeffs[1];
-	let coeff_2 = sum - coeff_0 - coeff_0 - coeff_1;
+	let coeff_2 = sum.sub(coeff_0).sub(coeff_0).sub(coeff_1);
 	[coeff_0, coeff_1, coeff_2]
 }
 
-fn evaluate_round_coeffs(coeffs: [F; 3], x: F) -> F {
+fn evaluate_round_coeffs<F: ExtractField>(coeffs: [F; 3], x: F) -> F {
 	let coeff_0 = coeffs[0];
 	let coeff_1 = coeffs[1];
 	let coeff_2 = coeffs[2];
-	coeff_0 + x * (coeff_1 + x * coeff_2)
+	coeff_0.add(x.mul(coeff_1.add(x.mul(coeff_2))))
 }
 
-fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
+fn eq_ind_partial_eval_scalars<F: ExtractField>(point: &[F]) -> Vec<F> {
 	let mut result = Vec::with_capacity(1);
-	result.push(F::ONE);
+	result.push(F::one());
 	let mut i = 0;
 	while i < point.len() {
 		let r_i = point[i];
@@ -940,8 +976,8 @@ fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 		let mut j = 0;
 		while j < len {
 			let value = result[j];
-			let prod = value * r_i;
-			next.push(value - prod);
+			let prod = value.mul(r_i);
+			next.push(value.sub(prod));
 			prods.push(prod);
 			j += 1;
 		}
@@ -957,36 +993,36 @@ fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 	result
 }
 
-fn fold_pair_with_domain(
-	twiddle_evals: &[Vec<ExtractField>],
+fn fold_pair_with_domain<F: ExtractField>(
+	twiddle_evals: &[Vec<F>],
 	round: usize,
 	index: usize,
 	values: (F, F),
 	challenge: F,
 ) -> F {
 	let basis_row = &twiddle_evals[twiddle_evals.len() - round][1..];
-	let mut twiddle = F::ZERO;
+	let mut twiddle = F::zero();
 	let mut mask = index;
 	let mut i = 0;
 	while mask != 0 {
 		if mask & 1 == 1 {
-			twiddle = twiddle + basis_row[i];
+			twiddle = twiddle.add(basis_row[i]);
 		}
 		mask >>= 1;
 		i += 1;
 	}
 	let mut left = values.0;
 	let mut right = values.1;
-	right = right + left;
-	left = left + right * twiddle;
-	left + (right - left) * challenge
+	right = right.add(left);
+	left = left.add(right.mul(twiddle));
+	left.add(right.sub(left).mul(challenge))
 }
 
-fn fold_chunk_with_domain(
-	twiddle_evals: &[Vec<ExtractField>],
+fn fold_chunk_with_domain<F: ExtractField>(
+	twiddle_evals: &[Vec<F>],
 	mut log_len: usize,
 	chunk_index: usize,
-	mut values: Vec<ExtractField>,
+	mut values: Vec<F>,
 	challenges: &[F],
 ) -> F {
 	let mut log_size = challenges.len();
@@ -1016,10 +1052,52 @@ fn fold_chunk_with_domain(
 	values[0]
 }
 
-fn fold_interleaved_chunk_scalar(values: &[F], tensor: &[F]) -> F {
-	let mut acc = F::ZERO;
+fn fold_interleaved_chunk_scalar<F: ExtractField>(values: &[F], tensor: &[F]) -> F {
+	let mut acc = F::zero();
 	for i in 0..values.len() {
-		acc = acc + values[i] * tensor[i];
+		acc = acc.add(values[i].mul(tensor[i]));
 	}
 	acc
+}
+
+pub fn verify_statement_transcript_128b_ghash_extract(
+	statement: &ExtractBasefoldStatement<BinaryField128bGhash>,
+	transcript: &ExtractBasefoldTranscriptView<BinaryField128bGhash>,
+) -> Result<ExtractReducedOutput<BinaryField128bGhash>, ExtractError> {
+	verify_statement_transcript_extract(statement, transcript)
+}
+
+pub fn verify_authenticated_statement_transcript_128b_ghash_extract(
+	statement: &ExtractBasefoldStatement<BinaryField128bGhash>,
+	transcript: &ExtractBasefoldTranscriptView<BinaryField128bGhash>,
+) -> Result<ExtractAuthenticatedLinearRelationOpening<BinaryField128bGhash>, ExtractError> {
+	verify_authenticated_statement_transcript_extract(statement, transcript)
+}
+
+pub fn finalize_authenticated_128b_ghash_extract(
+	params: &ExtractFriParams<BinaryField128bGhash>,
+	authenticated: ExtractAuthenticatedLinearRelationOpening<BinaryField128bGhash>,
+) -> Result<ExtractOpenedLinearRelationWithSampling<BinaryField128bGhash>, ExtractError> {
+	finalize_authenticated_extract(params, authenticated)
+}
+
+pub fn verify_scripted_128b_ghash_extract(
+	params: &ExtractFriParams<BinaryField128bGhash>,
+	codeword_commitment: ExtractDigest,
+	evaluation_claim: BinaryField128bGhash,
+	oracle: &mut ExtractProofOracle<BinaryField128bGhash>,
+) -> Result<ExtractReducedOutput<BinaryField128bGhash>, ExtractError> {
+	verify_scripted_extract(params, codeword_commitment, evaluation_claim, oracle)
+}
+
+/// Aliases for **Layer 1 / Layer 2** split (`crypto transport` → authenticated opening,
+/// `IOP core` → `verify_authenticated` in [`AuthenticatedStatementTranscriptProtocol`]). Bridge:
+/// `FRIBiniusBridge/IOPCoreTransportSplit.lean`.
+pub mod layered {
+	pub use super::{
+		ExtractAuthenticatedLinearRelationOpening as BasefoldCryptoTransportOutput,
+		ExtractReducedOutput as BasefoldIopSemanticOutput,
+		verify_authenticated_statement_transcript_128b_ghash_extract as crypto_transport_verify_basefold_128b_ghash_extract,
+		verify_statement_transcript_128b_ghash_extract as verify_basefold_full_128b_ghash_extract,
+	};
 }

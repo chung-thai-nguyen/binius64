@@ -11,6 +11,28 @@
 //! - keep Hax-facing entrypoints concrete and record-oriented
 //! - keep the generated Lean surface close to OracleReduction-style statements, transcripts,
 //!   authenticated openings, and semantic outputs
+//!
+//! # Layering: IOP semantic core vs crypto transport (ArkLib bridge)
+//!
+//! Implementations of [`AuthenticatedStatementTranscriptProtocol`] should treat the two trait
+//! methods as a **mandatory split** for formal verification:
+//!
+//! 1. **`verify_authenticated_statement_transcript`** — **Layer 1 (crypto / commitment
+//!    transport).** Consumes `statement × transcript` and returns an *authenticated intermediate*
+//!    (Merkle openings, digest-checked data, transcript consumption). This layer is **not** what
+//!    ArkLib’s post-commitment `OracleReduction` perfect completeness / RBR-KS theorems state
+//!    directly; it is the target of **explicit second lemmas** (commitment scheme, hashing, FS).
+//!
+//! 2. **`verify_authenticated`** — **Layer 2 (IOP semantic core).** Pure predicate on the
+//!    authenticated intermediate (+ statement parameters). This is what should refine to the
+//!    paper `OracleReduction` verifier after the transport lemmas connect types and relations.
+//!
+//! The default [`StatementTranscriptProtocol`] blanket impl composes **Layer 1 then Layer 2** in
+//! order. Hax-generated Lean keeps the same `match`-then-continue shape; the handwritten bridge
+//! module `FRIBiniusBridge/IOPCoreTransportSplit` names these layers for ArkLib correspondence.
+
+/// Marker for protocols that intentionally separate transport from IOP semantics (documentation + object safety).
+pub trait LayeredAuthenticatorVerifier: AuthenticatedStatementTranscriptProtocol {}
 
 /// A protocol whose verifier can be driven directly from a concrete statement and transcript view.
 pub trait StatementTranscriptProtocol {
@@ -44,6 +66,8 @@ pub trait AuthenticatedStatementTranscriptProtocol {
 		authenticated: Self::Authenticated,
 	) -> Result<Self::Output, Self::Error>;
 }
+
+impl<T> LayeredAuthenticatorVerifier for T where T: AuthenticatedStatementTranscriptProtocol {}
 
 impl<T> StatementTranscriptProtocol for T
 where

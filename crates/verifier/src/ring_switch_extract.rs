@@ -6,8 +6,9 @@
 //! intended for extraction experiments where the generic `IPVerifierChannel` boundary is already
 //! semantically right but a plain-data interpreter is more reliable for current extraction tools.
 
-use binius_iop::basefold_extract::F;
+use binius_iop::basefold_extract::ExtractField;
 use binius_iop::protocol_boundary::StatementTranscriptProtocol;
+use binius_field::BinaryField128bGhash;
 
 use crate::pcs::RingSwitchEqRelation as NormalizedRingSwitchEqRelation;
 use crate::ring_switch;
@@ -24,44 +25,44 @@ pub enum ExtractError {
 
 /// Monomorphic RingSwitch statement exported to Hax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchStatement<F: ExtractField> {
+pub struct ExtractRingSwitchStatement<F: ExtractField = BinaryField128bGhash> {
 	pub witness_eval: F,
-	pub eval_point: Vec<ExtractField>,
+	pub eval_point: Vec<F>,
 }
 
 /// Monomorphic prover-message view for RingSwitch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchProofView<F: ExtractField> {
-	pub messages: Vec<ExtractField>,
+pub struct ExtractRingSwitchProofView<F: ExtractField = BinaryField128bGhash> {
+	pub messages: Vec<F>,
 }
 
 /// Monomorphic verifier-randomness view for RingSwitch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchSamplingView<F: ExtractField> {
-	pub challenges: Vec<ExtractField>,
+pub struct ExtractRingSwitchSamplingView<F: ExtractField = BinaryField128bGhash> {
+	pub challenges: Vec<F>,
 }
 
 /// Monomorphic public-coin interaction view for RingSwitch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchTranscriptView<F: ExtractField> {
+pub struct ExtractRingSwitchTranscriptView<F: ExtractField = BinaryField128bGhash> {
 	pub proof: ExtractRingSwitchProofView<F>,
 	pub sampling: ExtractRingSwitchSamplingView<F>,
 }
 
 /// Thin protocol-boundary marker for the extraction-oriented RingSwitch verifier.
-pub struct ExtractRingSwitchProtocol<F: ExtractField>;
+pub struct ExtractRingSwitchProtocol;
 
 #[derive(Debug, Clone, Default)]
-pub struct ExtractRingSwitchChannel<F: ExtractField> {
-	pub messages: Vec<ExtractField>,
-	pub challenges: Vec<ExtractField>,
+pub struct ExtractRingSwitchChannel<F: ExtractField = BinaryField128bGhash> {
+	pub messages: Vec<F>,
+	pub challenges: Vec<F>,
 
 	message_pos: usize,
 	challenge_pos: usize,
 }
 
 impl<F: ExtractField> ExtractRingSwitchChannel<F> {
-	pub fn new(messages: Vec<ExtractField>, challenges: Vec<ExtractField>) -> Self {
+	pub fn new(messages: Vec<F>, challenges: Vec<F>) -> Self {
 		Self {
 			messages,
 			challenges,
@@ -70,7 +71,7 @@ impl<F: ExtractField> ExtractRingSwitchChannel<F> {
 		}
 	}
 
-	pub fn recv_many(&mut self, n: usize) -> Result<Vec<ExtractField>, ExtractError> {
+	pub fn recv_many(&mut self, n: usize) -> Result<Vec<F>, ExtractError> {
 		let end = self.message_pos + n;
 		if let Some(values) = self.messages.get(self.message_pos..end) {
 			self.message_pos = end;
@@ -80,7 +81,7 @@ impl<F: ExtractField> ExtractRingSwitchChannel<F> {
 		}
 	}
 
-	pub fn sample_many(&mut self, n: usize) -> Result<Vec<ExtractField>, ExtractError> {
+	pub fn sample_many(&mut self, n: usize) -> Result<Vec<F>, ExtractError> {
 		let end = self.challenge_pos + n;
 		if let Some(values) = self.challenges.get(self.challenge_pos..end) {
 			self.challenge_pos = end;
@@ -91,7 +92,7 @@ impl<F: ExtractField> ExtractRingSwitchChannel<F> {
 	}
 
 	pub fn assert_zero(&mut self, value: F) -> Result<(), ExtractError> {
-		if value == F::ZERO {
+		if value == F::zero() {
 			Ok(())
 		} else {
 			Err(ExtractError::InvalidAssert)
@@ -103,7 +104,7 @@ impl<F: ExtractField> ExtractRingSwitchChannel<F> {
 	}
 }
 
-impl From<&ExtractRingSwitchTranscriptView<F>> for ExtractRingSwitchChannel<F> {
+impl<F: ExtractField> From<&ExtractRingSwitchTranscriptView<F>> for ExtractRingSwitchChannel<F> {
 	fn from(value: &ExtractRingSwitchTranscriptView<F>) -> Self {
 		Self::new(
 			value.proof.messages.clone(),
@@ -114,13 +115,13 @@ impl From<&ExtractRingSwitchTranscriptView<F>> for ExtractRingSwitchChannel<F> {
 
 /// Monomorphic RingSwitch relation exported to Hax.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchEqRelation<F: ExtractField> {
-	pub eval_point_high: Vec<ExtractField>,
-	pub eq_r_double_prime: Vec<ExtractField>,
+pub struct ExtractRingSwitchEqRelation<F: ExtractField = BinaryField128bGhash> {
+	pub eval_point_high: Vec<F>,
+	pub eq_r_double_prime: Vec<F>,
 }
 
-impl From<NormalizedRingSwitchEqRelation<ExtractField>> for ExtractRingSwitchEqRelation<F> {
-	fn from(value: NormalizedRingSwitchEqRelation<ExtractField>) -> Self {
+impl<F: ExtractField> From<NormalizedRingSwitchEqRelation<F>> for ExtractRingSwitchEqRelation<F> {
+	fn from(value: NormalizedRingSwitchEqRelation<F>) -> Self {
 		Self {
 			eval_point_high: value.eval_point_high,
 			eq_r_double_prime: value.eq_r_double_prime,
@@ -128,13 +129,16 @@ impl From<NormalizedRingSwitchEqRelation<ExtractField>> for ExtractRingSwitchEqR
 	}
 }
 
-impl From<ring_switch::RingSwitchEqRelation<ExtractField>> for ExtractRingSwitchEqRelation<F> {
-	fn from(value: ring_switch::RingSwitchEqRelation<ExtractField>) -> Self {
+impl<F> From<ring_switch::RingSwitchEqRelation<F>> for ExtractRingSwitchEqRelation<F>
+where
+	F: ExtractField + binius_field::BinaryField + binius_field::PackedField<Scalar = F>,
+{
+	fn from(value: ring_switch::RingSwitchEqRelation<F>) -> Self {
 		NormalizedRingSwitchEqRelation::from(value).into()
 	}
 }
 
-impl From<ExtractRingSwitchEqRelation<F>> for NormalizedRingSwitchEqRelation<ExtractField> {
+impl<F: ExtractField> From<ExtractRingSwitchEqRelation<F>> for NormalizedRingSwitchEqRelation<F> {
 	fn from(value: ExtractRingSwitchEqRelation<F>) -> Self {
 		Self {
 			eval_point_high: value.eval_point_high,
@@ -143,7 +147,7 @@ impl From<ExtractRingSwitchEqRelation<F>> for NormalizedRingSwitchEqRelation<Ext
 	}
 }
 
-pub fn eval_relation_extract(
+pub fn eval_relation_extract<F: ExtractField>(
 	relation: &ExtractRingSwitchEqRelation<F>,
 	query: &[F],
 ) -> F {
@@ -151,7 +155,7 @@ pub fn eval_relation_extract(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExtractRingSwitchOutput<F: ExtractField> {
+pub struct ExtractRingSwitchOutput<F: ExtractField = BinaryField128bGhash> {
 	pub relation: ExtractRingSwitchEqRelation<F>,
 	pub sumcheck_claim: F,
 }
@@ -161,14 +165,14 @@ impl<F: ExtractField> ExtractRingSwitchStatement<F> {
 		&self,
 		transcript: &ExtractRingSwitchTranscriptView<F>,
 	) -> Result<ExtractRingSwitchOutput<F>, ExtractError> {
-		ExtractRingSwitchProtocol<F>::verify_statement_transcript(self, transcript)
+		verify_statement_transcript_extract(self, transcript)
 	}
 }
 
-impl StatementTranscriptProtocol for ExtractRingSwitchProtocol<F> {
-	type Statement = ExtractRingSwitchStatement<F>;
-	type TranscriptView = ExtractRingSwitchTranscriptView<F>;
-	type Output = ExtractRingSwitchOutput<F>;
+impl StatementTranscriptProtocol for ExtractRingSwitchProtocol {
+	type Statement = ExtractRingSwitchStatement<BinaryField128bGhash>;
+	type TranscriptView = ExtractRingSwitchTranscriptView<BinaryField128bGhash>;
+	type Output = ExtractRingSwitchOutput<BinaryField128bGhash>;
 	type Error = ExtractError;
 
 	fn verify_statement_transcript(
@@ -179,11 +183,11 @@ impl StatementTranscriptProtocol for ExtractRingSwitchProtocol<F> {
 	}
 }
 
-pub fn verify_statement_transcript_extract(
+pub fn verify_statement_transcript_extract<F: ExtractField>(
 	statement: &ExtractRingSwitchStatement<F>,
 	transcript: &ExtractRingSwitchTranscriptView<F>,
 ) -> Result<ExtractRingSwitchOutput<F>, ExtractError> {
-	let mut channel = ExtractRingSwitchChannel<F>::from(transcript);
+	let mut channel = ExtractRingSwitchChannel::<F>::from(transcript);
 	let output = verify_scripted_extract(
 		statement.witness_eval,
 		&statement.eval_point,
@@ -196,8 +200,8 @@ pub fn verify_statement_transcript_extract(
 	}
 }
 
-pub(crate) fn evaluate_multilinear_scalars(
-	mut evals: Vec<ExtractField>,
+pub(crate) fn evaluate_multilinear_scalars<F: ExtractField>(
+	mut evals: Vec<F>,
 	point: &[F],
 ) -> F {
 	assert_eq!(evals.len(), 1 << point.len(), "precondition: evals length must be 2^point.len()");
@@ -210,8 +214,8 @@ pub(crate) fn evaluate_multilinear_scalars(
 		let mut next = Vec::with_capacity(half_len);
 		let mut j = 0;
 		while j < half_len {
-			let delta = evals[j + half_len] - evals[j];
-			next.push(evals[j] + point_i * delta);
+			let delta = evals[j + half_len].sub(evals[j]);
+			next.push(evals[j].add(point_i.mul(delta)));
 			j += 1;
 		}
 		evals = next;
@@ -220,9 +224,9 @@ pub(crate) fn evaluate_multilinear_scalars(
 	evals[0]
 }
 
-pub(crate) fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
+pub(crate) fn eq_ind_partial_eval_scalars<F: ExtractField>(point: &[F]) -> Vec<F> {
 	let mut result = Vec::with_capacity(1);
-	result.push(F::ONE);
+	result.push(F::one());
 	let mut i = 0;
 	while i < point.len() {
 		let r_i = point[i];
@@ -232,8 +236,8 @@ pub(crate) fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 		let mut j = 0;
 		while j < len {
 			let value = result[j];
-			let prod = value * r_i;
-			next.push(value - prod);
+			let prod = value.mul(r_i);
+			next.push(value.sub(prod));
 			prods.push(prod);
 			j += 1;
 		}
@@ -249,7 +253,7 @@ pub(crate) fn eq_ind_partial_eval_scalars(point: &[F]) -> Vec<ExtractField> {
 	result
 }
 
-pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
+pub(crate) fn transpose_basis_rows<F: ExtractField>(values: &[F]) -> Vec<F> {
 	assert_eq!(
 		values.len(),
 		PACKING_DEGREE,
@@ -259,13 +263,13 @@ pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
 	let mut basis_rows = Vec::with_capacity(PACKING_DEGREE);
 	let mut basis_i = 0;
 	while basis_i < PACKING_DEGREE {
-		basis_rows.push(ExtractField::new(1u128 << basis_i));
+		basis_rows.push(F::from_u128(1u128 << basis_i));
 		basis_i += 1;
 	}
 	let mut transposed = Vec::with_capacity(PACKING_DEGREE);
 	let mut init = 0;
 	while init < PACKING_DEGREE {
-		transposed.push(F::ZERO);
+		transposed.push(F::zero());
 		init += 1;
 	}
 
@@ -273,7 +277,7 @@ pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
 	while row < PACKING_DEGREE {
 		let value = values[row];
 		let row_basis = basis_rows[row];
-		let value_bits = value.val();
+		let value_bits = value.to_u128();
 
 		let mut col = 0;
 		while col < PACKING_DEGREE {
@@ -282,7 +286,7 @@ pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
 				let mut i = 0;
 				while i < PACKING_DEGREE {
 					let entry = if i == col {
-						transposed[i] + row_basis
+						transposed[i].add(row_basis)
 					} else {
 						transposed[i]
 					};
@@ -300,7 +304,7 @@ pub(crate) fn transpose_basis_rows(values: &[F]) -> Vec<ExtractField> {
 	transposed
 }
 
-pub(crate) fn eval_rs_eq_extract(
+pub(crate) fn eval_rs_eq_extract<F: ExtractField>(
 	z_vals: &[F],
 	query: &[F],
 	expanded_row_batch_query: &[F],
@@ -316,9 +320,9 @@ pub(crate) fn eval_rs_eq_extract(
 	let mut init = 0;
 	while init < PACKING_DEGREE {
 		if init == 0 {
-			tensor_eval.push(F::ONE);
+			tensor_eval.push(F::one());
 		} else {
-			tensor_eval.push(F::ZERO);
+			tensor_eval.push(F::zero());
 		}
 		init += 1;
 	}
@@ -328,45 +332,45 @@ pub(crate) fn eval_rs_eq_extract(
 		let vert_i = z_vals[i];
 		let hztl_i = query[i];
 
-		let mut vert_scaled = Vec::with_capacity(PACKING_DEGREE);
-		let mut j = 0;
-		while j < PACKING_DEGREE {
-			vert_scaled.push(tensor_eval[j] * vert_i);
-			j += 1;
-		}
+			let mut vert_scaled = Vec::with_capacity(PACKING_DEGREE);
+			let mut j = 0;
+			while j < PACKING_DEGREE {
+				vert_scaled.push(tensor_eval[j].mul(vert_i));
+				j += 1;
+			}
 
 		let mut hztl_scaled = transpose_basis_rows(&tensor_eval);
-		let mut j = 0;
-		let mut hztl_scaled_next = Vec::with_capacity(PACKING_DEGREE);
-		while j < PACKING_DEGREE {
-			hztl_scaled_next.push(hztl_scaled[j] * hztl_i);
-			j += 1;
-		}
+			let mut j = 0;
+			let mut hztl_scaled_next = Vec::with_capacity(PACKING_DEGREE);
+			while j < PACKING_DEGREE {
+				hztl_scaled_next.push(hztl_scaled[j].mul(hztl_i));
+				j += 1;
+			}
 		hztl_scaled = hztl_scaled_next;
 		hztl_scaled = transpose_basis_rows(&hztl_scaled);
 
-		let mut next_tensor_eval = Vec::with_capacity(PACKING_DEGREE);
-		let mut j = 0;
-		while j < PACKING_DEGREE {
-			next_tensor_eval.push(tensor_eval[j] + vert_scaled[j] + hztl_scaled[j]);
-			j += 1;
-		}
+			let mut next_tensor_eval = Vec::with_capacity(PACKING_DEGREE);
+			let mut j = 0;
+			while j < PACKING_DEGREE {
+				next_tensor_eval.push(tensor_eval[j].add(vert_scaled[j]).add(hztl_scaled[j]));
+				j += 1;
+			}
 		tensor_eval = next_tensor_eval;
 
 		i += 1;
 	}
 
 	let folded = transpose_basis_rows(&tensor_eval);
-	let mut acc = F::ZERO;
+	let mut acc = F::zero();
 	let mut i = 0;
 	while i < PACKING_DEGREE {
-		acc = acc + folded[i] * expanded_row_batch_query[i];
+		acc = acc.add(folded[i].mul(expanded_row_batch_query[i]));
 		i += 1;
 	}
 	acc
 }
 
-pub fn verify_scripted_extract(
+pub fn verify_scripted_extract<F: ExtractField>(
 	evaluation_claim: F,
 	eval_point: &[F],
 	channel: &mut ExtractRingSwitchChannel<F>,
@@ -376,7 +380,7 @@ pub fn verify_scripted_extract(
 	let s_hat_v = channel.recv_many(PACKING_DEGREE)?;
 
 	let computed_claim = evaluate_multilinear_scalars(s_hat_v.clone(), eval_point_low);
-	channel.assert_zero(evaluation_claim - computed_claim)?;
+	channel.assert_zero(evaluation_claim.sub(computed_claim))?;
 
 	let s_hat_u = transpose_basis_rows(&s_hat_v);
 
@@ -384,8 +388,8 @@ pub fn verify_scripted_extract(
 	let eq_r_double_prime = eq_ind_partial_eval_scalars(&r_double_prime);
 	let sumcheck_claim = evaluate_multilinear_scalars(s_hat_u, &r_double_prime);
 
-	Ok(ExtractRingSwitchOutput<F> {
-		relation: ExtractRingSwitchEqRelation<F> {
+	Ok(ExtractRingSwitchOutput {
+		relation: ExtractRingSwitchEqRelation {
 			eval_point_high: eval_point_high.to_vec(),
 			eq_r_double_prime,
 		},
@@ -393,29 +397,46 @@ pub fn verify_scripted_extract(
 	})
 }
 
+pub fn verify_statement_transcript_128b_ghash_extract(
+	statement: &ExtractRingSwitchStatement<BinaryField128bGhash>,
+	transcript: &ExtractRingSwitchTranscriptView<BinaryField128bGhash>,
+) -> Result<ExtractRingSwitchOutput<BinaryField128bGhash>, ExtractError> {
+	verify_statement_transcript_extract(statement, transcript)
+}
+
+pub fn verify_scripted_128b_ghash_extract(
+	evaluation_claim: BinaryField128bGhash,
+	eval_point: &[BinaryField128bGhash],
+	channel: &mut ExtractRingSwitchChannel<BinaryField128bGhash>,
+) -> Result<ExtractRingSwitchOutput<BinaryField128bGhash>, ExtractError> {
+	verify_scripted_extract(evaluation_claim, eval_point, channel)
+}
+
 #[cfg(test)]
 mod tests {
+	use binius_field::BinaryField128bGhash;
 	use binius_ip::channel::IPVerifierChannel;
 	use binius_math::test_utils::random_scalars;
 	use rand::{SeedableRng, rngs::StdRng};
 
 	use super::{
-		F, ExtractRingSwitchChannel<F>, LOG_PACKING, PACKING_DEGREE,
-		eval_rs_eq_extract, evaluate_multilinear_scalars,
-		verify_scripted_extract,
+		ExtractRingSwitchChannel, LOG_PACKING, PACKING_DEGREE, eval_rs_eq_extract,
+		evaluate_multilinear_scalars, verify_scripted_extract,
 	};
 	use crate::ring_switch;
 
+	type TestField = BinaryField128bGhash;
+
 	#[derive(Debug, Clone)]
 	struct GenericScriptedChannel {
-		messages: Vec<ExtractField>,
-		challenges: Vec<ExtractField>,
+		messages: Vec<TestField>,
+		challenges: Vec<TestField>,
 		message_pos: usize,
 		challenge_pos: usize,
 	}
 
 	impl GenericScriptedChannel {
-		fn new(messages: Vec<ExtractField>, challenges: Vec<ExtractField>) -> Self {
+		fn new(messages: Vec<TestField>, challenges: Vec<TestField>) -> Self {
 			Self {
 				messages,
 				challenges,
@@ -425,8 +446,8 @@ mod tests {
 		}
 	}
 
-	impl IPVerifierChannel<ExtractField> for GenericScriptedChannel {
-		type Elem = F;
+	impl IPVerifierChannel<TestField> for GenericScriptedChannel {
+		type Elem = TestField;
 
 		fn recv_one(&mut self) -> Result<Self::Elem, binius_ip::channel::Error> {
 			if let Some(value) = self.messages.get(self.message_pos) {
@@ -455,16 +476,16 @@ mod tests {
 			value
 		}
 
-		fn observe_one(&mut self, val: F) -> Self::Elem {
+		fn observe_one(&mut self, val: TestField) -> Self::Elem {
 			val
 		}
 
-		fn observe_many(&mut self, vals: &[F]) -> Vec<Self::Elem> {
+		fn observe_many(&mut self, vals: &[TestField]) -> Vec<Self::Elem> {
 			vals.to_vec()
 		}
 
 		fn assert_zero(&mut self, val: Self::Elem) -> Result<(), binius_ip::channel::Error> {
-			if val == F::ZERO {
+			if val == TestField::new(0) {
 				Ok(())
 			} else {
 				Err(binius_ip::channel::Error::InvalidAssert)
@@ -476,18 +497,18 @@ mod tests {
 	fn extract_matches_generic_ring_switch_verifier() {
 		let mut rng = StdRng::seed_from_u64(0);
 
-		let s_hat_v = random_scalars::<ExtractField>(&mut rng, PACKING_DEGREE);
-		let eval_point = random_scalars::<ExtractField>(&mut rng, LOG_PACKING + 4);
+		let s_hat_v = random_scalars::<TestField>(&mut rng, PACKING_DEGREE);
+		let eval_point = random_scalars::<TestField>(&mut rng, LOG_PACKING + 4);
 		let evaluation_claim =
 			evaluate_multilinear_scalars(s_hat_v.clone(), &eval_point[..LOG_PACKING]);
-		let r_double_prime = random_scalars::<ExtractField>(&mut rng, LOG_PACKING);
+		let r_double_prime = random_scalars::<TestField>(&mut rng, LOG_PACKING);
 
 		let generic_output = {
 			let mut channel = GenericScriptedChannel::new(s_hat_v.clone(), r_double_prime.clone());
 			ring_switch::verify(evaluation_claim, &eval_point, &mut channel).unwrap()
 		};
 
-		let mut extract_channel = ExtractRingSwitchChannel<F> {
+		let mut extract_channel = ExtractRingSwitchChannel::<TestField> {
 			messages: s_hat_v,
 			challenges: r_double_prime,
 			..Default::default()
@@ -508,9 +529,9 @@ mod tests {
 	fn extract_eval_rs_eq_matches_generic_version() {
 		let mut rng = StdRng::seed_from_u64(1);
 
-		let z_vals = random_scalars::<ExtractField>(&mut rng, 6);
-		let query = random_scalars::<ExtractField>(&mut rng, 6);
-		let expanded_row_batch_query = random_scalars::<ExtractField>(&mut rng, PACKING_DEGREE);
+		let z_vals = random_scalars::<TestField>(&mut rng, 6);
+		let query = random_scalars::<TestField>(&mut rng, 6);
+		let expanded_row_batch_query = random_scalars::<TestField>(&mut rng, PACKING_DEGREE);
 
 		let generic = ring_switch::eval_rs_eq(&z_vals, &query, &expanded_row_batch_query);
 		let extracted = eval_rs_eq_extract(&z_vals, &query, &expanded_row_batch_query);
